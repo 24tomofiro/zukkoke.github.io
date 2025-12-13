@@ -131,7 +131,7 @@ prompt = f"""
 
 3. **商品リンク (Amazon & 楽天)**:
    - **記事内で具体的な製品名（型番など）が登場したら、必ずその直後かセクションの終わりにAmazonと楽天の検索リンクを並べて配置すること。**
-   - リンク形式: `[🛒 Amazonで検索](https://www.amazon.co.jp/s?k={製品名}) | [🔴 楽天で検索](https://search.rakuten.co.jp/search/mall/{製品名})`
+   - リンク形式: `[🛒 Amazonで検索](https://www.amazon.co.jp/s?k={{製品名}}) | [🔴 楽天で検索](https://search.rakuten.co.jp/search/mall/{{製品名}})`
    - URL内の製品名はスペースを `+` に置換するなどして有効なリンクにすること。
    - 例: `[🛒 Amazonで DS223j を見る](https://www.amazon.co.jp/s?k=Synology+DS223j) | [🔴 楽天で DS223j を見る](https://search.rakuten.co.jp/search/mall/Synology+DS223j)`
 
