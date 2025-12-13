@@ -1,0 +1,42 @@
+name: Market Sniper Bot
+
+on:
+  schedule:
+    # 4時間ごとに実行 (UTC基準)
+    # 日本時間だと 3時, 7時, 11時, 15時, 19時, 23時
+    - cron: '0 */4 * * *'
+  workflow_dispatch: # テスト用の手動実行ボタン
+
+permissions:
+  contents: write
+
+jobs:
+  check_and_post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r scripts/requirements.txt
+
+      - name: Check Market and Generate Post
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # ここで新しいスクリプトを実行
+          python scripts/market_sniper.py
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "Gemini Sniper"
+          git config --global user.email "gemini-sniper@example.com"
+          git add _posts/*.md
+          # 変更（新しい記事）がある場合のみコミット
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-generated market alert post" && git push)
