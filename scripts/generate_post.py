@@ -6,6 +6,7 @@ import re
 import urllib.parse
 import json
 import time
+import csv  # 追加
 
 # APIキーの取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -29,31 +30,94 @@ correct_front_matter_img_path = f"posts/{date_compact}/{cover_filename}"
 # モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# --- テーマの取得 ---
-THEME_FILE = "themes.json"
-specific_theme = None
+# ==========================================
+#  ここから: CSV管理ロジックへの変更部分
+# ==========================================
+IDEAS_FILE = "ideas.csv"
+current_idea = None
 
-if os.path.exists(THEME_FILE):
+def get_next_idea_and_update_csv(file_path):
+    """
+    CSVを読み込み、ステータスが未完了の最初の行を取得。
+    取得と同時にメモリ上でステータスを更新し、ファイルを上書き保存する。
+    """
+    if not os.path.exists(file_path):
+        print(f"Error: {file_path} not found.")
+        return None
+
+    target_row = None
+    all_rows = []
+    
+    # 1. 読み込み
     try:
-        with open(THEME_FILE, "r", encoding="utf-8") as f:
-            themes = json.load(f)
-        specific_theme = themes.get(date_str)
-        if specific_theme:
-            print(f"★ Theme found for today: {specific_theme}")
+        with open(file_path, mode='r', encoding='utf-8-sig') as f: # Excel互換のためutf-8-sig推奨
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            all_rows = list(reader)
     except Exception as e:
-        print(f"Error reading themes.json: {e}")
+        print(f"Error reading CSV: {e}")
+        return None
 
-if specific_theme:
-    theme_instruction = f"テーマ: 「{specific_theme}」について、深く掘り下げて書いてください。"
+    # 2. 未処理データの検索と更新
+    for row in all_rows:
+        # ステータス列が空、または '未' の場合を対象とする
+        status = row.get('ステータス', '').strip()
+        if status not in ['済', 'Done', 'Complete']:
+            target_row = row
+            
+            # メモリ上で更新 (ステータスと日付)
+            row['ステータス'] = '済'
+            row['記事化日'] = date_str
+            
+            print(f"★ Found new idea: {row.get('製品名')}")
+            break
+    
+    if not target_row:
+        print("No new ideas found in CSV (All done).")
+        return None
+
+    # 3. CSVへの書き戻し（ロック用）
+    try:
+        with open(file_path, mode='w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(all_rows)
+            print("CSV updated: Status set to '済'")
+    except Exception as e:
+        print(f"Error updating CSV: {e}")
+        # 書き込み失敗時はNoneを返して処理を中断させるべき
+        return None
+
+    return target_row
+
+# 実行してテーマを取得
+idea_data = get_next_idea_and_update_csv(IDEAS_FILE)
+
+if idea_data:
+    product_name = idea_data.get('製品名', 'ガジェット')
+    details = idea_data.get('活用詳細', '') # カラム名はCSVに合わせて調整してください
+    price = idea_data.get('推定価格', '')
+    
+    theme_instruction = f"""
+    今回の執筆対象製品: 「{product_name}」 (推定価格: {price})
+    
+    この製品の「極限活用法」として、以下のアイデアを核にして記事を膨らませてください：
+    {details}
+    """
 else:
-    theme_instruction = "テーマ: 「今日のPythonテクニック」または「最新のAIニュース」から1つ選んで書いてください。"
+    # CSVにネタがない、またはエラー時のフォールバック
+    print("Fallback to default theme.")
+    theme_instruction = "テーマ: 「最新の低価格ガジェット活用術」について書いてください。"
+    product_name = "ガジェット" # 仮置き
 
+# ==========================================
+#  ここまで: CSV管理ロジックへの変更部分
+# ==========================================
 
 def download_ai_image(prompt_text, save_path):
     """画像生成・保存関数"""
     try:
         encoded_prompt = urllib.parse.quote(prompt_text)
-        # seedを時間で変えてバリエーションを出す
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={int(time.time())}"
         print(f"Downloading image: {prompt_text[:30]}...")
         
@@ -83,7 +147,7 @@ def process_body_images(content, save_dir, web_path_prefix):
         full_prompt = f"{prompt_text} professional tech illustration 4k"
         
         if download_ai_image(full_prompt, save_path):
-            markdown_image = f"![{prompt_text}](./assets/img/{web_path})"
+            markdown_image = f"![{prompt_text}](/assets/img/{web_path})" # パス修正: /assets... から始まる絶対パス推奨
             new_content = new_content.replace(f"[[IMG:{prompt_text}]]", markdown_image)
             new_content = new_content.replace(f"[[IMG: {prompt_text}]]", markdown_image)
         else:
@@ -93,6 +157,7 @@ def process_body_images(content, save_dir, web_path_prefix):
     return new_content
 
 # --- 1. 記事生成 ---
+# プロンプト内の変数を product_name を使うように微調整
 prompt = f"""
 あなたは**「コストパフォーマンスの追求をこよなく愛し、製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口テックブロガー」**です。
 以下のテーマについて、読者が「ここまでやるか？」と驚くような、しかし実用的でコストパフォーマンスに優れた「極限活用術（ハック）」の記事を書いてください。
@@ -119,20 +184,17 @@ prompt = f"""
    - **まとめ**: 「今日からすぐやるべきアクション」を提示して締める。
 
 3. **アフィリエイトリンクの配置（重要）**:
-   - 記事内で紹介した具体的な**製品名やサービス名**が登場したら、その直後（または段落の終わり）に必ず検索リンクを置くこと。
-   - **Markdownの表（テーブル）は使用禁止**（スマホ表示崩れ防止のため）。
-   - リンクは以下の形式で記述し、`製品名`の部分にはその文脈で紹介した具体的な商品名を入れること。
-   - 形式: `▷ [🛒 Amazonで「製品名」を検索](https://www.amazon.co.jp/s?k=製品名) | [🔴 楽天で「製品名」を検索](https://search.rakuten.co.jp/search/mall/製品名)`
-   - 記事の最後にも「今回紹介したアイテムリスト」として箇条書きでリンクを再掲すること。
+   - 記事内で紹介した具体的な製品名やサービス名が登場したら、その直後（または段落の終わり）に必ず検索リンクを置くこと。
+   - **Markdownの表（テーブル）は使用禁止**。
+   - リンク形式: `▷ [🛒 Amazonで「{product_name}」を検索](https://www.amazon.co.jp/s?k={product_name})`
+   - 記事の最後にも「今回紹介したアイテムリスト」としてリンクを再掲すること。
 
 4. **画像生成プロンプトの挿入**:
    - 記事の理解を助ける挿絵が必要な箇所に、以下の形式で2〜3回挿入すること。
    - 形式: `[[IMG: 英語の画像生成プロンプト]]`
-   - プロンプト例: `workspace desk setup with multiple monitors and mechanical keyboard, cinematic lighting, photorealistic 8k`
-   - ※プロンプトは具体的かつ写実的なシーンを描写する英語にすること。
 
 ## 必須フォーマット (厳守)
-以下のFront Matter形式で開始し、その後にMarkdown本文を続けること。
+以下のFront Matter形式で開始すること。
 
 ---
 layout: post
@@ -140,17 +202,16 @@ toc: true
 read_time: true
 show_date: true
 title: "【極限活用】(ここに刺激的なタイトル)"
-date: "{date_str}"
-img: "{correct_front_matter_img_path}"
-tags: [Productivity, LifeHack, Gadget, Python]
+date: {date_str}
+img: {correct_front_matter_img_path}
+tags: [Productivity, LifeHack, Gadget, {product_name}]
 category: tech
 author: "Gemini Bot"
 description: "(ここに80文字程度のSEOを意識した記事概要)"
 ---
 
 (ここから本文を開始)
-<tweet>(ここに記事のハイライトとなる「パンチライン（名言）」を1つ書く)</tweet>
-
+<tweet>(ここに記事のハイライトとなる「パンチライン」を1つ書く)</tweet>
 """
 
 try:
@@ -165,7 +226,8 @@ try:
 
     # --- 2. 画像生成処理 ---
     print("--- Generating Cover Image ---")
-    image_prompt = f"{specific_theme if specific_theme else 'technology python ai'} professional header 4k"
+    # プロンプトに製品名を含める
+    image_prompt = f"{product_name} technology minimal workspace professional 4k"
     if not download_ai_image(image_prompt, cover_physical_path):
         print("Warning: Cover image generation failed.")
 
@@ -174,7 +236,7 @@ try:
     content = process_body_images(content, image_dir, web_path_prefix)
 
     # --- 3. ファイル保存 ---
-    filename = f"{date_str}-daily-update.md"
+    filename = f"{date_str}-{product_name}.md" # ファイル名に製品名を入れると管理しやすい
     filepath = os.path.join("_posts", filename)
     os.makedirs("_posts", exist_ok=True)
 
