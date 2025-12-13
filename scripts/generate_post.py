@@ -112,7 +112,11 @@ prompt = f"""
 
 3. **商品リンク**:
    - 製品名が登場したら直後にAmazon/楽天リンクを配置。
-   - `[🛒 Amazon](https://www.amazon.co.jp/s?k={{製品名}}) | [🔴 楽天](https://search.rakuten.co.jp/search/mall/{{製品名}})`
+   - 商品リンクは記事の中で1回のみ配置し、同じ製品名が再登場してもリンクは追加しない。
+   - 記事の最後に商品リンクのまとめを配置。
+   - **重要: Markdownの表（テーブル）は絶対に使用しないこと。単純なテキストリンクとして配置すること。**
+   - リンク形式: `[🛒 Amazonで検索](https://www.amazon.co.jp/s?k={{製品名}})  [🔴 楽天で検索](https://search.rakuten.co.jp/search/mall/{{製品名}})`
+   - ※区切り文字にはパイプ記号(|)を使わず、スペース2つを使用すること。
 
 4. **挿入画像**:
    - 記事の途中に `[[IMG: 英語プロンプト]]` を2〜3箇所入れる。
@@ -121,7 +125,7 @@ prompt = f"""
 1. **Front Matter**:
    - `title`, `description` は必ずダブルクォーテーション (") で囲む。
    - タイトルは「【極限活用】」や「【最適化】」などの引きのある言葉を入れる。
-   - **`toc: true` を必ず記述すること (目次表示のため)。**
+   - **`toc: true` を必ず記述すること。**
    - `date`: {date_str}
    - `img`: {correct_front_matter_img_path}
    
@@ -141,20 +145,10 @@ prompt = f"""
    ---
 
 2. **本文**:
-   - `<tweet>記事の核となるパンチライン（例：月額0円で容量無制限のクラウドを手に入れろ）</tweet>` を入れる。
-   - コードを紹介する際は、必ず以下のようなコードブロック記法を使うこと（単なるインデントは禁止）。
-     ```python
-     print("Hello")
-     ```
+   - `<tweet>パンチライン</tweet>` を入れる。
+   - コードブロック以外で `|` (パイプ) を使用しないこと（表崩れ防止）。
    - 画像リンク: `![Alt text](./assets/img/posts/{date_compact}/image.jpg)`
    - 画像キャプション: `<small>図1: 説明文</small>`
-   - 見出し（##, ###）を適切に使い、読みやすくする。
-
-3. **商品リンク (Amazon & 楽天)**:
-   - **記事内で具体的な製品名（型番など）が登場したら、必ずその直後かセクションの終わりにAmazonと楽天の検索リンクを並べて配置すること。**
-   - リンク形式: `[🛒 Amazonで検索](https://www.amazon.co.jp/s?k={{製品名}}) | [🔴 楽天で検索](https://search.rakuten.co.jp/search/mall/{{製品名}})`
-   - URL内の製品名はスペースを `+` に置換するなどして有効なリンクにすること。
-   - 例: `[🛒 Amazonで DS223j を見る](https://www.amazon.co.jp/s?k=Synology+DS223j) | [🔴 楽天で DS223j を見る](https://search.rakuten.co.jp/search/mall/Synology+DS223j)`
 
 ## 出力
 Markdownの本文のみ出力。
@@ -167,7 +161,6 @@ try:
     # --- 強制修正ロジック ---
     content = re.sub(r'^date:\s*.*$', f'date: {date_str}', content, flags=re.MULTILINE)
     content = re.sub(r'^img:\s*.*$', f'img: {correct_front_matter_img_path}', content, flags=re.MULTILINE)
-    # toc: true がなければ強制的に追加（念の為）
     if "toc: true" not in content:
         content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
 
