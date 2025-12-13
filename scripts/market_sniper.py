@@ -43,7 +43,7 @@ def get_market_data():
 
 def generate_sniper_article(data):
     """Geminiで速報記事を生成する"""
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     trend = "急騰" if data["change_percent"] > 0 else "急落"
     sign = "+" if data["change_percent"] > 0 else ""
