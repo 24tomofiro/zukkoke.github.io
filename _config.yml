@@ -47,7 +47,7 @@ fbadmin: ar.maybach
 
 # Paginate
 paginate: 6
-paginate_path: 'page:num'
+paginate_path: '/page:num/'
 words_per_minute: 200
 
 extensions:
