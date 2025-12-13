@@ -5,6 +5,7 @@ import google.generativeai as genai
 import re
 import urllib.parse
 import json
+import time # ★追加: 画像のシード値生成用
 
 # APIキーの取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -21,9 +22,9 @@ date_compact = today.strftime('%Y%m%d')
 # 画像保存用設定
 image_dir = os.path.join("assets", "img", "posts", date_compact)
 os.makedirs(image_dir, exist_ok=True)
-image_filename = "cover.jpg"
-image_physical_path = os.path.join(image_dir, image_filename)
-correct_front_matter_img_path = f"posts/{date_compact}/{image_filename}"
+cover_filename = "cover.jpg"
+cover_physical_path = os.path.join(image_dir, cover_filename)
+correct_front_matter_img_path = f"posts/{date_compact}/{cover_filename}"
 
 # モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
@@ -56,21 +57,59 @@ else:
 def download_ai_image(prompt_text, save_path):
     """画像生成・保存関数"""
     try:
+        # プロンプトをURLエンコード
         encoded_prompt = urllib.parse.quote(prompt_text)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true"
-        print(f"Downloading image from: {url}")
+        
+        # Pollinations.aiを使用 (seedを時間で変えてバリエーションを出す)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={int(time.time())}"
+        print(f"Downloading image: {prompt_text[:30]}...")
         
         response = requests.get(url, timeout=30)
         if response.status_code == 200:
             with open(save_path, 'wb') as f:
                 f.write(response.content)
-            print(f"Image saved to: {save_path}")
+            print(f"Saved to: {save_path}")
             return True
         else:
-            print(f"Download failed with status: {response.status_code}")
+            print(f"Download failed: {response.status_code}")
     except Exception as e:
-        print(f"Image download failed: {e}")
+        print(f"Image download error: {e}")
     return False
+
+def process_body_images(content, save_dir, web_path_prefix):
+    """
+    本文中の [[IMG: プロンプト]] を検索し、画像を生成して置換する関数
+    """
+    # 正規表現で [[IMG: ... ]] を探す
+    matches = re.findall(r'\[\[IMG:\s*(.*?)\]\]', content)
+    
+    new_content = content
+    
+    for i, prompt_text in enumerate(matches):
+        # 画像ファイル名を決定 (body-1.jpg, body-2.jpg...)
+        filename = f"body-{i+1}.jpg"
+        save_path = os.path.join(save_dir, filename)
+        web_path = f"{web_path_prefix}/{filename}" # Jekyll上のパス
+        
+        print(f"Found body image request: {prompt_text}")
+        
+        # 画像生成を実行
+        # プロンプトに 'professional, 4k' などを付与して品質を上げる
+        full_prompt = f"{prompt_text} professional tech illustration 4k"
+        
+        if download_ai_image(full_prompt, save_path):
+            # 成功したらMarkdownの画像リンクに置換
+            # [[IMG: ...]] -> ![prompt](path)
+            markdown_image = f"![{prompt_text}](./assets/img/{web_path})"
+            # スペースの有無両方に対応して置換
+            new_content = new_content.replace(f"[[IMG:{prompt_text}]]", markdown_image)
+            new_content = new_content.replace(f"[[IMG: {prompt_text}]]", markdown_image)
+        else:
+            # 失敗したらタグを消す（テキストに残らないように）
+            new_content = new_content.replace(f"[[IMG:{prompt_text}]]", "")
+            new_content = new_content.replace(f"[[IMG: {prompt_text}]]", "")
+            
+    return new_content
 
 # --- 1. 記事生成 ---
 prompt = f"""
@@ -87,53 +126,31 @@ prompt = f"""
    - 読者に対して「自分が持っている製品を眠らせておくのは罪だ」と啓蒙するような熱い語り口。
 
 2. **必須構成案**:
-   - **導入**: 対象製品のスペックに触れつつ、一般的な「できない」という思い込みを否定する。（例：「Dockerが使えない？ だからどうした」）
+   - **導入**: 対象製品のスペックに触れつつ、一般的な「できない」という思い込みを否定する。
    - **活用例 (3〜5選)**: 具体的なアプリ名を挙げ、それをどう「極限まで」使うかを紹介する。
-     - 構成例: 「カテゴリ名」→「アプリ名」→「極限活用法（具体的なメリット）」
-   - **現実的な注意点**: 褒めるだけでなく、製品の制約（メモリ不足など）によるデメリットと、それを回避する「使いこなしのコツ（運用回避策）」を正直に書く。
-   - **まとめ**: 結局、この使い方は「何（月額費やプライバシー）」を取り戻せるのかを総括する。
-   - **Next Step**: 読者が今日から始められる最初の一歩を提案する。
-
-3. **文体**:
-   - 「〜です、〜ます」調だが、断定的で自信に満ちた表現を使う。
-   - 専門用語を使いつつも、初心者にもメリットが伝わる比喩を用いる（例：「自宅警備員」「自分だけのGoogle」）。
-
-## 必須フォーマットルール (システム連携用・厳守)
-1. **Front Matter**:
-   - `title`, `description` は必ずダブルクォーテーション (") で囲む。
-   - タイトルは「【極限活用】」や「【最適化】」などの引きのある言葉を入れる。
-   - `date`: {date_str}
-   - `img`: {correct_front_matter_img_path}
-   
-   例:
-   ---
-   layout: post
-   read_time: true
-   show_date: true
-   title: "【極限活用】DS223jを骨の髄までしゃぶり尽くす脱サブスク術"
-   date: {date_str}
-   img: {correct_front_matter_img_path}
-   tags: [Synology, NAS, Gadget, LifeHack]
-   category: gadget
-   author: Gemini Bot
-   description: "メモリ1GBのNASでも諦めるな。GoogleフォトもDropboxも解約できる、DS223jの真の力を解放する方法を解説します。"
-   ---
-
-2. **本文**:
-   - `<tweet>記事の核となるパンチライン（例：月額0円で容量無制限のクラウドを手に入れろ）</tweet>` を入れる。
-   - コードを紹介する際は、必ず以下のようなコードブロック記法を使うこと（単なるインデントは禁止）。
-     ```python
-     print("Hello")
-     ```
-   - 画像リンク: `![Alt text](./assets/img/posts/{date_compact}/image.jpg)`
-   - 画像キャプション: `<small>図1: 説明文</small>`
-   - 見出し（##, ###）を適切に使い、読みやすくする。
+   - **現実的な注意点**: メモリ不足などのデメリットと、それを回避する「使いこなしのコツ」を正直に書く。
+   - **まとめ**: 結局、この使い方は「何」を取り戻せるのかを総括する。
 
 3. **商品リンク (Amazon & 楽天)**:
    - **記事内で具体的な製品名（型番など）が登場したら、必ずその直後かセクションの終わりにAmazonと楽天の検索リンクを並べて配置すること。**
    - リンク形式: `[🛒 Amazonで検索](https://www.amazon.co.jp/s?k={{製品名}}) | [🔴 楽天で検索](https://search.rakuten.co.jp/search/mall/{{製品名}})`
    - URL内の製品名はスペースを `+` に置換するなどして有効なリンクにすること。
-   - 例: `[🛒 Amazonで DS223j を見る](https://www.amazon.co.jp/s?k=Synology+DS223j) | [🔴 楽天で DS223j を見る](https://search.rakuten.co.jp/search/mall/Synology+DS223j)`
+
+4. **★重要：挿入画像について**:
+   - 記事の途中（セクションの変わり目など）に、内容を補足する画像を挿入したい。
+   - 画像を入れたい場所に **`[[IMG: 画像の英語プロンプト]]`** というタグを記述すること。
+   - 例: `[[IMG: Synology NAS server room cyber punk style]]`
+   - 全体で2〜3枚程度挿入すること。プロンプトは必ず**英語**で書くこと。
+
+## 必須フォーマットルール (システム連携用・厳守)
+1. **Front Matter**:
+   - `title`, `description` は必ずダブルクォーテーション (") で囲む。
+   - `date`: {date_str}
+   - `img`: {correct_front_matter_img_path}
+
+2. **本文**:
+   - `<tweet>パンチライン</tweet>` を入れる。
+   - 見出し（##, ###）を適切に使い、読みやすくする。
 
 ## 出力
 Markdownの本文のみ出力。
@@ -147,11 +164,19 @@ try:
     content = re.sub(r'^date:\s*.*$', f'date: {date_str}', content, flags=re.MULTILINE)
     content = re.sub(r'^img:\s*.*$', f'img: {correct_front_matter_img_path}', content, flags=re.MULTILINE)
 
-    # --- 2. 画像生成 ---
-    # テーマに基づいたキーワードで画像を生成
+    # --- 2. 画像生成処理 ---
+    
+    # A. カバー画像の生成
+    print("--- Generating Cover Image ---")
     image_prompt = f"{specific_theme if specific_theme else 'technology python ai'} professional header 4k"
-    if not download_ai_image(image_prompt, image_physical_path):
+    if not download_ai_image(image_prompt, cover_physical_path):
         print("Warning: Cover image generation failed.")
+
+    # B. 本文内画像の生成・置換 (★ここが追加機能)
+    print("--- Processing Body Images ---")
+    # Jekyllでのパスプレフィックス: posts/20251213
+    web_path_prefix = f"posts/{date_compact}"
+    content = process_body_images(content, image_dir, web_path_prefix)
 
     # --- 3. ファイル保存 ---
     filename = f"{date_str}-daily-update.md"
