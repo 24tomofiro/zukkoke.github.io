@@ -19,49 +19,74 @@ date_compact = today.strftime('%Y%m%d')
 # その場合は 'gemini-1.5-flash' や 'gemini-2.0-flash-exp' などに戻してください。
 model = genai.GenerativeModel('gemini-2.5-flash')
 
+# プロンプト：フォーマットを厳密に定義
 prompt = f"""
-あなたはプロのテックブロガーです。以下のフォーマットルールに厳密に従って、GitHub Pages用のMarkdown記事を1つ作成してください。
+あなたはプロのテックブロガーです。
+以下の「必須フォーマットルール」に**一字一句正確に従って**、GitHub Pages (Jekyll) 用のMarkdown記事を作成してください。
 
 ## テーマ
-「今日のPythonの豆知識」または「AI技術の最新トレンド」について、ランダムに1つ選んで書いてください。
+「今日のPythonテクニック」または「最新のAIニュース」から1つ選んで書いてください。
 
-## 必須フォーマットルール
-1. Front Matterを必ず含めること。
-   - layout: post
-   - read_time: true
-   - show_date: true
-   - title: (魅力的なタイトル)
-   - date: {date_str}
-   - img: posts/{date_compact}/cover.jpg
-   - tags: [関連するタグ]
-   - category: tech
-   - author: Gemini Bot
-   - description: (記事の要約)
-2. 本文中に最低1回は `<tweet>強調したいポイント</tweet>` というカスタムタグを使用すること。
-3. 可能な限り `<iframe ...>` でYouTube動画を埋め込むか、それが無理ならその旨は書かず自然な文章にする。
-4. 画像を入れる場合は `![Alt text](./assets/img/posts/{date_compact}/sample.jpg)` の形式にする。
-   (※キャプションとして `<small>... </small>` をつけること)
-5. コードブロックは適切に使用すること。
+## 必須フォーマットルール (厳守)
+1. **Front Matter (ヘッダー)**:
+   - 記事の先頭には必ずFront Matterをつけること。
+   - `title` と `description` の値は、**必ずダブルクォーテーション (") で囲むこと**。これはJekyllのビルドエラーを防ぐため必須です。
+   
+   【正しいFront Matterの例】
+   ---
+   layout: post
+   read_time: true
+   show_date: true
+   title: "記事のタイトルをここに書く"
+   date: {date_str}
+   img: posts/{date_compact}/cover.jpg
+   tags: [Tag1, Tag2]
+   category: tech
+   author: Gemini Bot
+   description: "記事の概要をここに書く。必ず引用符で囲むこと。"
+   ---
+
+2. **本文の記法**:
+   - `<tweet>強調したいポイント</tweet>` を1回以上使うこと。
+   - コードを紹介する際は、必ず以下のようなコードブロック記法を使うこと（単なるインデントは禁止）。
+     ```python
+     print("Hello")
+     ```
+   - 画像リンク形式: `![Alt text](./assets/img/posts/{date_compact}/image.jpg)`
+   - 画像キャプション: `<small>図1: 説明文</small>`
 
 ## 出力
-Markdownの生テキストのみを出力してください（冒頭の ```markdown は不要）。
+Markdownの本文のみを出力してください（冒頭の ```markdown や文末の ``` は含めないでください）。
 """
 
-# コンテンツ生成 (generate_text ではなく generate_content を使用)
-response = model.generate_content(prompt)
-content = response.text
+# コンテンツ生成
+try:
+    response = model.generate_content(prompt)
+    content = response.text
 
-# 不要なMarkdown記法を削除
-content = content.replace("```markdown", "").replace("```", "").strip()
+    # 不要なMarkdown記法（```markdown ... ```）が混じっていた場合のみ削除
+    if content.startswith("```markdown"):
+        content = content.replace("```markdown", "", 1)
+    if content.startswith("```"):
+        content = content.replace("```", "", 1)
+    if content.endswith("```"):
+        content = content[:-3]
+    
+    content = content.strip()
 
-# ファイル保存処理
-filename = f"{date_str}-daily-update.md"
-filepath = os.path.join("_posts", filename)
+    # ファイル保存処理
+    filename = f"{date_str}-daily-update.md"
+    filepath = os.path.join("_posts", filename)
 
-# _postsフォルダがない場合に備えて作成
-os.makedirs("_posts", exist_ok=True)
+    # フォルダがない場合は作成
+    os.makedirs("_posts", exist_ok=True)
 
-with open(filepath, "w", encoding="utf-8") as f:
-    f.write(content)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
 
-print(f"Successfully generated: {filepath}")
+    print(f"Successfully generated: {filepath}")
+
+except Exception as e:
+    print(f"Error occurred: {e}")
+    # GitHub Actionsでエラーを検知させるためにexitコードを返す
+    exit(1)
