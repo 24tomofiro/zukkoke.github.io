@@ -2,7 +2,7 @@ import os
 import datetime
 import google.generativeai as genai
 
-# GitHub Actionsの環境変数からAPIキーを取得
+# APIキーの取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     raise ValueError("GEMINI_API_KEY is not set")
@@ -14,10 +14,11 @@ today = datetime.date.today()
 date_str = today.strftime('%Y-%m-%d')
 date_compact = today.strftime('%Y%m%d')
 
-# 生成するモデルの設定
-model = genai.GenerativeModel('gemini-1.5-flash')
+# モデル設定：指定された gemini-2.5-flash を使用
+# ※もし将来的にモデル名が変更されたり、まだ利用できない場合はエラー(404)になる可能性があります。
+# その場合は 'gemini-1.5-flash' や 'gemini-2.0-flash-exp' などに戻してください。
+model = genai.GenerativeModel('gemini-2.5-flash')
 
-# プロンプト（あなたが指定したフォーマットを厳守させる）
 prompt = f"""
 あなたはプロのテックブロガーです。以下のフォーマットルールに厳密に従って、GitHub Pages用のMarkdown記事を1つ作成してください。
 
@@ -31,7 +32,7 @@ prompt = f"""
    - show_date: true
    - title: (魅力的なタイトル)
    - date: {date_str}
-   - img: posts/{date_compact}/cover.jpg (※画像パスはこの形式で固定)
+   - img: posts/{date_compact}/cover.jpg
    - tags: [関連するタグ]
    - category: tech
    - author: Gemini Bot
@@ -46,21 +47,20 @@ prompt = f"""
 Markdownの生テキストのみを出力してください（冒頭の ```markdown は不要）。
 """
 
-# 記事生成
-response = genai.generate_text(prompt=prompt) # 旧APIまたは新APIに合わせて調整
-# gemini-1.5系を使う場合は以下
+# コンテンツ生成 (generate_text ではなく generate_content を使用)
 response = model.generate_content(prompt)
 content = response.text
 
-# ```markdown 等の不要な装飾を削除（念のため）
+# 不要なMarkdown記法を削除
 content = content.replace("```markdown", "").replace("```", "").strip()
 
-# ファイル名の決定 (例: 2025-12-13-daily-update.md)
-# 簡易的に固定ファイル名にしていますが、本来はタイトルから英語ファイル名を生成するのがベストです
+# ファイル保存処理
 filename = f"{date_str}-daily-update.md"
 filepath = os.path.join("_posts", filename)
 
-# ファイル書き出し
+# _postsフォルダがない場合に備えて作成
+os.makedirs("_posts", exist_ok=True)
+
 with open(filepath, "w", encoding="utf-8") as f:
     f.write(content)
 
