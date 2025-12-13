@@ -1,9 +1,10 @@
 import os
 import datetime
-import requests # 画像ダウンロード用
+import requests
 import google.generativeai as genai
-import re # ★追加: テキスト置換用
-import urllib.parse # ★追加: URLエンコード用
+import re
+import urllib.parse
+import json # ★追加
 
 # APIキーの取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -12,34 +13,55 @@ if not API_KEY:
 
 genai.configure(api_key=API_KEY)
 
-# --- 日付とパスの確定 (Python側で管理) ---
+# --- 日付とパスの確定 ---
 today = datetime.date.today()
-date_str = today.strftime('%Y-%m-%d')       # 例: 2025-12-13
-date_compact = today.strftime('%Y%m%d')     # 例: 20251213
+date_str = today.strftime('%Y-%m-%d')
+date_compact = today.strftime('%Y%m%d')
 
-# 画像保存用ディレクトリの作成
+# 画像保存用設定
 image_dir = os.path.join("assets", "img", "posts", date_compact)
 os.makedirs(image_dir, exist_ok=True)
 image_filename = "cover.jpg"
 image_physical_path = os.path.join(image_dir, image_filename)
-
-# Front Matterに書くべき正しいパス (Jekyll用)
 correct_front_matter_img_path = f"posts/{date_compact}/{image_filename}"
 
 # モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-def download_ai_image(prompt_text, save_path):
-    """Pollinations.aiを使って画像を生成・保存する"""
+# --- ★追加機能: テーマの取得 ---
+THEME_FILE = "themes.json" # ルートディレクトリにある前提
+specific_theme = None
+
+if os.path.exists(THEME_FILE):
     try:
-        # ★修正: プロンプトをURLエンコードしてスペース等を処理
+        with open(THEME_FILE, "r", encoding="utf-8") as f:
+            themes = json.load(f)
+        # 今日の日付のテーマがあるか確認
+        specific_theme = themes.get(date_str)
+        if specific_theme:
+            print(f"★ Theme found for today: {specific_theme}")
+        else:
+            print("No theme found for today. Using random topic.")
+    except Exception as e:
+        print(f"Error reading themes.json: {e}")
+else:
+    print(f"{THEME_FILE} not found. Using random topic.")
+
+# テーマの決定
+if specific_theme:
+    theme_instruction = f"テーマ: 「{specific_theme}」について、深く掘り下げて書いてください。"
+else:
+    theme_instruction = "テーマ: 「今日のPythonテクニック」または「最新のAIニュース」から1つ選んで書いてください。"
+
+
+def download_ai_image(prompt_text, save_path):
+    """画像生成・保存関数"""
+    try:
         encoded_prompt = urllib.parse.quote(prompt_text)
-        
-        # seedを固定しないことで毎回違う画像になる
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true"
         print(f"Downloading image from: {url}")
         
-        response = requests.get(url, timeout=30) # タイムアウトを少し長めに
+        response = requests.get(url, timeout=30)
         if response.status_code == 200:
             with open(save_path, 'wb') as f:
                 f.write(response.content)
@@ -54,24 +76,25 @@ def download_ai_image(prompt_text, save_path):
 # --- 1. 記事生成 ---
 prompt = f"""
 あなたはプロのテックブロガーです。
-以下の「必須フォーマットルール」に**一字一句正確に従って**、GitHub Pages (Jekyll) 用のMarkdown記事を作成してください。
+以下のルールに従って、GitHub Pages (Jekyll) 用のMarkdown記事を作成してください。
 
-## テーマ
-「今日のPythonテクニック」または「最新のAIニュース」から1つ選んで書いてください。
+## 執筆テーマ
+{theme_instruction}
 
 ## 必須フォーマットルール (厳守)
-1. **Front Matter (ヘッダー)**:
-   - 記事の先頭には必ずFront Matterをつけること。
-   - `title` と `description` の値は、**必ずダブルクォーテーション (") で囲むこと**。これはJekyllのビルドエラーを防ぐため必須です。
+1. **Front Matter**:
+   - `title`, `description` は必ずダブルクォーテーション (") で囲む。
+   - `date`: {date_str}
+   - `img`: {correct_front_matter_img_path}
    
-   【正しいFront Matterの例】
+   例:
    ---
    layout: post
    read_time: true
    show_date: true
-   title: "記事のタイトルをここに書く"
+   title: "記事タイトル"
    date: {date_str}
-   img: posts/{date_compact}/cover.jpg
+   img: {correct_front_matter_img_path}
    tags: [Tag1, Tag2]
    category: tech
    author: Gemini Bot
@@ -88,28 +111,21 @@ prompt = f"""
    - 画像キャプション: `<small>図1: 説明文</small>`
 
 ## 出力
-Markdownの本文のみを出力してください（冒頭の ```markdown や文末の ``` は含めないでください）。
+Markdownの本文のみ出力。
 """
 
 try:
     response = model.generate_content(prompt)
-    content = response.text
-    content = content.replace("```markdown", "").replace("```", "").strip()
+    content = response.text.replace("```markdown", "").replace("```", "").strip()
 
-    # --- ★追加: 強制修正ロジック ---
-    # AIが間違った日付やパスを出力しても、ここで正しい値に上書きします
-    
-    # date: 行を強制置換
+    # --- 強制修正ロジック ---
     content = re.sub(r'^date:\s*.*$', f'date: {date_str}', content, flags=re.MULTILINE)
-    
-    # img: 行を強制置換
     content = re.sub(r'^img:\s*.*$', f'img: {correct_front_matter_img_path}', content, flags=re.MULTILINE)
-    
-    # ---------------------------
 
     # --- 2. 画像生成 ---
-    # 記事の内容に関連するキーワードで画像を生成
-    if not download_ai_image("futuristic technology artificial intelligence python programming style 4k", image_physical_path):
+    # テーマに基づいたキーワードで画像を生成
+    image_prompt = f"{specific_theme if specific_theme else 'technology python ai'} professional header 4k"
+    if not download_ai_image(image_prompt, image_physical_path):
         print("Warning: Cover image generation failed.")
 
     # --- 3. ファイル保存 ---
