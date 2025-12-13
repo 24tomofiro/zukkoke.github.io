@@ -1,5 +1,7 @@
 import os
 import datetime
+import time
+import requests # 画像ダウンロード用
 import google.generativeai as genai
 
 # APIキーの取得
@@ -9,17 +11,40 @@ if not API_KEY:
 
 genai.configure(api_key=API_KEY)
 
-# 今日の日付
+# 日付設定
 today = datetime.date.today()
 date_str = today.strftime('%Y-%m-%d')
 date_compact = today.strftime('%Y%m%d')
 
-# モデル設定：指定された gemini-2.5-flash を使用
-# ※もし将来的にモデル名が変更されたり、まだ利用できない場合はエラー(404)になる可能性があります。
-# その場合は 'gemini-1.5-flash' や 'gemini-2.0-flash-exp' などに戻してください。
+# 画像保存用ディレクトリの作成 (assets/img/posts/YYYYMMDD)
+image_dir = os.path.join("assets", "img", "posts", date_compact)
+os.makedirs(image_dir, exist_ok=True)
+image_filename = "cover.jpg"
+image_path = os.path.join(image_dir, image_filename)
+
+# フロントマター用のパス (テーマの仕様に合わせて調整)
+front_matter_img_path = f"posts/{date_compact}/{image_filename}"
+
+# モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# プロンプト：フォーマットを厳密に定義
+def download_ai_image(prompt_text, save_path):
+    """Pollinations.aiを使って画像を生成・保存する"""
+    try:
+        # URLエンコードしてAPIを叩く (seedを固定しないことで毎回違う画像になる)
+        url = f"https://image.pollinations.ai/prompt/{prompt_text}?width=1200&height=630&nologo=true"
+        print(f"Downloading image from: {url}")
+        response = requests.get(url, timeout=20)
+        if response.status_code == 200:
+            with open(save_path, 'wb') as f:
+                f.write(response.content)
+            print(f"Image saved to: {save_path}")
+            return True
+    except Exception as e:
+        print(f"Image download failed: {e}")
+    return False
+
+# --- 1. 記事生成 ---
 prompt = f"""
 あなたはプロのテックブロガーです。
 以下の「必須フォーマットルール」に**一字一句正確に従って**、GitHub Pages (Jekyll) 用のMarkdown記事を作成してください。
@@ -59,34 +84,28 @@ prompt = f"""
 Markdownの本文のみを出力してください（冒頭の ```markdown や文末の ``` は含めないでください）。
 """
 
-# コンテンツ生成
 try:
     response = model.generate_content(prompt)
     content = response.text
+    content = content.replace("```markdown", "").replace("```", "").strip()
 
-    # 不要なMarkdown記法（```markdown ... ```）が混じっていた場合のみ削除
-    if content.startswith("```markdown"):
-        content = content.replace("```markdown", "", 1)
-    if content.startswith("```"):
-        content = content.replace("```", "", 1)
-    if content.endswith("```"):
-        content = content[:-3]
-    
-    content = content.strip()
+    # --- 2. 画像生成 ---
+    # 記事の内容に関連するキーワードで画像を生成
+    # (簡易的に「technology, ai, python」などを指定。記事内容から抽出も可能だが今回は固定で安定させる)
+    if not download_ai_image("futuristic technology artificial intelligence python programming style 4k", image_path):
+        # 失敗したらデフォルト画像やエラーログなどを検討
+        print("Warning: Cover image generation failed.")
 
-    # ファイル保存処理
+    # --- 3. ファイル保存 ---
     filename = f"{date_str}-daily-update.md"
     filepath = os.path.join("_posts", filename)
-
-    # フォルダがない場合は作成
     os.makedirs("_posts", exist_ok=True)
 
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(f"Successfully generated: {filepath}")
+    print(f"Successfully generated post: {filepath}")
 
 except Exception as e:
     print(f"Error occurred: {e}")
-    # GitHub Actionsでエラーを検知させるためにexitコードを返す
     exit(1)

@@ -1,5 +1,6 @@
 import os
 import datetime
+import requests # 画像ダウンロード用に追加
 import google.generativeai as genai
 import yfinance as yf
 
@@ -41,7 +42,28 @@ def get_market_data():
         print(f"Data fetch error: {e}")
         return None
 
-def generate_sniper_article(data):
+def download_chart_image(trend, ticker, save_path):
+    """トレンドに合わせた画像を生成して保存する"""
+    # トレンドに合わせて色や雰囲気を指定
+    color = "green" if trend == "up" else "red"
+    # プロンプト: 株価チャート、上昇/下降、色、プロフェッショナル、4K
+    prompt_text = f"stock market chart {ticker} trend going {trend} color {color} professional finance 4k"
+    
+    url = f"https://image.pollinations.ai/prompt/{prompt_text}?width=1200&height=630&nologo=true"
+    
+    try:
+        print(f"Downloading image from: {url}")
+        response = requests.get(url, timeout=20)
+        if response.status_code == 200:
+            with open(save_path, 'wb') as f:
+                f.write(response.content)
+            print(f"Image saved to: {save_path}")
+            return True
+    except Exception as e:
+        print(f"Image download failed: {e}")
+    return False
+
+def generate_sniper_article(data, front_matter_img_path):
     """Geminiで速報記事を生成する"""
     model = genai.GenerativeModel('gemini-2.5-flash')
     
@@ -59,10 +81,11 @@ def generate_sniper_article(data):
     # 必須フォーマットルール (Jekyll互換性のために厳守)
     1. **Front Matterの `title` と `description` は必ずダブルクォーテーション (") で囲むこと。**
        例: title: "【緊急】S&P500が動いた！..."
-    2. タイトルはクリックしたくなるような煽りを含める。
-    3. 本文中に `<tweet>{data['ticker']}が前日比{data['change_percent']:.2f}%の変動。市場はどう動く？</tweet>` を含める。
-    4. 変動の要因として考えられる一般的な理由（金利、決算、地政学リスクなど）を推測で良いので挙げて解説する。
-    5. 出力はMarkdownの本文のみ。
+    2. **Front Matterの `img` には "{front_matter_img_path}" を指定すること。**
+    3. タイトルはクリックしたくなるような煽りを含める。
+    4. 本文中に `<tweet>{data['ticker']}が前日比{data['change_percent']:.2f}%の変動。市場はどう動く？</tweet>` を含める。
+    5. 変動の要因として考えられる一般的な理由（金利、決算、地政学リスクなど）を推測で良いので挙げて解説する。
+    6. 出力はMarkdownの本文のみ。
     """
     
     response = model.generate_content(prompt)
@@ -82,10 +105,30 @@ if data:
     if abs(data["change_percent"]) >= THRESHOLD_PERCENT:
         print(">>> THRESHOLD EXCEEDED! Generating article...")
         
-        content = generate_sniper_article(data)
-        
-        # ファイル名に時刻を入れて、同日に複数回起きても上書きしないようにする
+        # --- 画像保存の準備 ---
         now = datetime.datetime.now()
+        date_compact = now.strftime('%Y%m%d')
+        time_str = now.strftime('%H%M')
+        
+        # 保存先ディレクトリ: assets/img/posts/YYYYMMDD
+        image_dir = os.path.join("assets", "img", "posts", date_compact)
+        os.makedirs(image_dir, exist_ok=True)
+        
+        # 画像ファイル名
+        image_filename = f"sniper-{time_str}.jpg"
+        image_physical_path = os.path.join(image_dir, image_filename)
+        
+        # 記事内で指定するパス (Jekyll用)
+        front_matter_path = f"posts/{date_compact}/{image_filename}"
+        
+        # --- 画像生成・ダウンロード実行 ---
+        trend_str = "up" if data["change_percent"] > 0 else "down"
+        download_chart_image(trend_str, data["ticker"], image_physical_path)
+        
+        # --- 記事生成実行 (画像パスを渡す) ---
+        content = generate_sniper_article(data, front_matter_path)
+        
+        # --- 記事ファイル保存 ---
         filename = f"{now.strftime('%Y-%m-%d-%H%M')}-market-alert.md"
         filepath = os.path.join("_posts", filename)
         
