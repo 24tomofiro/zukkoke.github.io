@@ -5,6 +5,7 @@ import google.generativeai as genai
 import re
 import urllib.parse
 import json
+import time
 
 # APIキーの取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -21,15 +22,15 @@ date_compact = today.strftime('%Y%m%d')
 # 画像保存用設定
 image_dir = os.path.join("assets", "img", "posts", date_compact)
 os.makedirs(image_dir, exist_ok=True)
-image_filename = "cover.jpg"
-image_physical_path = os.path.join(image_dir, image_filename)
-correct_front_matter_img_path = f"posts/{date_compact}/{image_filename}"
+cover_filename = "cover.jpg"
+cover_physical_path = os.path.join(image_dir, cover_filename)
+correct_front_matter_img_path = f"posts/{date_compact}/{cover_filename}"
 
 # モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # --- テーマの取得 ---
-THEME_FILE = "themes.json" # ルートディレクトリにある前提
+THEME_FILE = "themes.json"
 specific_theme = None
 
 if os.path.exists(THEME_FILE):
@@ -39,14 +40,9 @@ if os.path.exists(THEME_FILE):
         specific_theme = themes.get(date_str)
         if specific_theme:
             print(f"★ Theme found for today: {specific_theme}")
-        else:
-            print("No theme found for today. Using random topic.")
     except Exception as e:
         print(f"Error reading themes.json: {e}")
-else:
-    print(f"{THEME_FILE} not found. Using random topic.")
 
-# テーマの決定
 if specific_theme:
     theme_instruction = f"テーマ: 「{specific_theme}」について、深く掘り下げて書いてください。"
 else:
@@ -57,20 +53,44 @@ def download_ai_image(prompt_text, save_path):
     """画像生成・保存関数"""
     try:
         encoded_prompt = urllib.parse.quote(prompt_text)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true"
-        print(f"Downloading image from: {url}")
+        # seedを時間で変えてバリエーションを出す
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={int(time.time())}"
+        print(f"Downloading image: {prompt_text[:30]}...")
         
         response = requests.get(url, timeout=30)
         if response.status_code == 200:
             with open(save_path, 'wb') as f:
                 f.write(response.content)
-            print(f"Image saved to: {save_path}")
+            print(f"Saved to: {save_path}")
             return True
         else:
-            print(f"Download failed with status: {response.status_code}")
+            print(f"Download failed: {response.status_code}")
     except Exception as e:
-        print(f"Image download failed: {e}")
+        print(f"Image download error: {e}")
     return False
+
+def process_body_images(content, save_dir, web_path_prefix):
+    """本文中の [[IMG: プロンプト]] を検索し、画像を生成して置換する"""
+    matches = re.findall(r'\[\[IMG:\s*(.*?)\]\]', content)
+    new_content = content
+    
+    for i, prompt_text in enumerate(matches):
+        filename = f"body-{i+1}.jpg"
+        save_path = os.path.join(save_dir, filename)
+        web_path = f"{web_path_prefix}/{filename}"
+        
+        print(f"Found body image request: {prompt_text}")
+        full_prompt = f"{prompt_text} professional tech illustration 4k"
+        
+        if download_ai_image(full_prompt, save_path):
+            markdown_image = f"![{prompt_text}](./assets/img/{web_path})"
+            new_content = new_content.replace(f"[[IMG:{prompt_text}]]", markdown_image)
+            new_content = new_content.replace(f"[[IMG: {prompt_text}]]", markdown_image)
+        else:
+            new_content = new_content.replace(f"[[IMG:{prompt_text}]]", "")
+            new_content = new_content.replace(f"[[IMG: {prompt_text}]]", "")
+            
+    return new_content
 
 # --- 1. 記事生成 ---
 prompt = f"""
@@ -80,43 +100,44 @@ prompt = f"""
 ## 執筆テーマ
 {theme_instruction}
 
-## 執筆方針 (Tone & Manner)
+## 執筆方針
 1. **ペルソナ**:
    - 建前だけのカタログスペック紹介は嫌い。「実際に現場でどう使えるか」を重視する。
-   - 「脱Google」「脱サブスクリプション」「プライバシー保護」こそが至高という思想を持つ。
-   - 読者に対して「自分が持っている製品を眠らせておくのは罪だ」と啓蒙するような熱い語り口。
+   - 「脱サブスク」「自動化」こそが至高という思想を持つ。
+   - 熱い語り口で書く。
 
 2. **必須構成案**:
-   - **導入**: 対象製品のスペックに触れつつ、一般的な「できない」という思い込みを否定する。（例：「Dockerが使えない？ だからどうした」）
-   - **活用例 (3〜5選)**: 具体的なアプリ名を挙げ、それをどう「極限まで」使うかを紹介する。
-     - 構成例: 「カテゴリ名」→「アプリ名」→「極限活用法（具体的なメリット）」
-   - **現実的な注意点**: 褒めるだけでなく、製品の制約（メモリ不足など）によるデメリットと、それを回避する「使いこなしのコツ（運用回避策）」を正直に書く。
-   - **まとめ**: 結局、この使い方は「何（月額費やプライバシー）」を取り戻せるのかを総括する。
-   - **Next Step**: 読者が今日から始められる最初の一歩を提案する。
+   - 導入、活用例(3〜5選)、注意点、まとめの順。
+   - 見出し（##, ###）をしっかり使い、目次が生成されやすい構造にする。
 
-3. **文体**:
-   - 「〜です、〜ます」調だが、断定的で自信に満ちた表現を使う。
-   - 専門用語を使いつつも、初心者にもメリットが伝わる比喩を用いる（例：「自宅警備員」「自分だけのGoogle」）。
+3. **商品リンク**:
+   - 製品名が登場したら直後にAmazon/楽天リンクを配置。
+   - `[🛒 Amazon](https://www.amazon.co.jp/s?k={{製品名}}) | [🔴 楽天](https://search.rakuten.co.jp/search/mall/{{製品名}})`
 
-## 必須フォーマットルール (システム連携用・厳守)
+4. **挿入画像**:
+   - 記事の途中に `[[IMG: 英語プロンプト]]` を2〜3箇所入れる。
+
+## 必須フォーマットルール (厳守)
 1. **Front Matter**:
    - `title`, `description` は必ずダブルクォーテーション (") で囲む。
    - タイトルは「【極限活用】」や「【最適化】」などの引きのある言葉を入れる。
+   - **`toc: true` を必ず記述すること (目次表示のため)。**
    - `date`: {date_str}
    - `img`: {correct_front_matter_img_path}
    
    例:
    ---
    layout: post
+   toc: true
    read_time: true
    show_date: true
-   title: "【極限活用】DS223jを骨の髄までしゃぶり尽くす脱サブスク術"
+   title: "記事タイトル"
    date: {date_str}
    img: {correct_front_matter_img_path}
-   tags: [Synology, NAS, Gadget, LifeHack]
-   category: gadget
+   tags: [Tag1, Tag2]
+   category: tech
    author: Gemini Bot
-   description: "メモリ1GBのNASでも諦めるな。GoogleフォトもDropboxも解約できる、DS223jの真の力を解放する方法を解説します。"
+   description: "記事概要"
    ---
 
 2. **本文**:
@@ -146,12 +167,19 @@ try:
     # --- 強制修正ロジック ---
     content = re.sub(r'^date:\s*.*$', f'date: {date_str}', content, flags=re.MULTILINE)
     content = re.sub(r'^img:\s*.*$', f'img: {correct_front_matter_img_path}', content, flags=re.MULTILINE)
+    # toc: true がなければ強制的に追加（念の為）
+    if "toc: true" not in content:
+        content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
 
-    # --- 2. 画像生成 ---
-    # テーマに基づいたキーワードで画像を生成
+    # --- 2. 画像生成処理 ---
+    print("--- Generating Cover Image ---")
     image_prompt = f"{specific_theme if specific_theme else 'technology python ai'} professional header 4k"
-    if not download_ai_image(image_prompt, image_physical_path):
+    if not download_ai_image(image_prompt, cover_physical_path):
         print("Warning: Cover image generation failed.")
+
+    print("--- Processing Body Images ---")
+    web_path_prefix = f"posts/{date_compact}"
+    content = process_body_images(content, image_dir, web_path_prefix)
 
     # --- 3. ファイル保存 ---
     filename = f"{date_str}-daily-update.md"
