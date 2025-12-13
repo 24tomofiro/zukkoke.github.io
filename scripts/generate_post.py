@@ -4,7 +4,7 @@ import requests
 import google.generativeai as genai
 import re
 import urllib.parse
-import json # ★追加
+import json
 
 # APIキーの取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -28,7 +28,7 @@ correct_front_matter_img_path = f"posts/{date_compact}/{image_filename}"
 # モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# --- ★追加機能: テーマの取得 ---
+# --- テーマの取得 ---
 THEME_FILE = "themes.json" # ルートディレクトリにある前提
 specific_theme = None
 
@@ -36,7 +36,6 @@ if os.path.exists(THEME_FILE):
     try:
         with open(THEME_FILE, "r", encoding="utf-8") as f:
             themes = json.load(f)
-        # 今日の日付のテーマがあるか確認
         specific_theme = themes.get(date_str)
         if specific_theme:
             print(f"★ Theme found for today: {specific_theme}")
@@ -129,6 +128,12 @@ prompt = f"""
    - 画像リンク: `![Alt text](./assets/img/posts/{date_compact}/image.jpg)`
    - 画像キャプション: `<small>図1: 説明文</small>`
    - 見出し（##, ###）を適切に使い、読みやすくする。
+
+3. **商品リンク (Amazon & 楽天)**:
+   - **記事内で具体的な製品名（型番など）が登場したら、必ずその直後かセクションの終わりにAmazonと楽天の検索リンクを並べて配置すること。**
+   - リンク形式: `[🛒 Amazonで検索](https://www.amazon.co.jp/s?k={製品名}) | [🔴 楽天で検索](https://search.rakuten.co.jp/search/mall/{製品名})`
+   - URL内の製品名はスペースを `+` に置換するなどして有効なリンクにすること。
+   - 例: `[🛒 Amazonで DS223j を見る](https://www.amazon.co.jp/s?k=Synology+DS223j) | [🔴 楽天で DS223j を見る](https://search.rakuten.co.jp/search/mall/Synology+DS223j)`
 
 ## 出力
 Markdownの本文のみ出力。
