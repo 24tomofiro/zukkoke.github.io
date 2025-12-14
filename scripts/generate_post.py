@@ -16,21 +16,19 @@ if not API_KEY:
 genai.configure(api_key=API_KEY)
 
 # ==========================================
-#  変更点1: 日付だけでなく「現在時刻」を取得して固有IDを作る
+#  日付設定
 # ==========================================
 now = datetime.datetime.now()
-date_str = now.strftime('%Y-%m-%d')            # 2025-12-14 (Front Matter用)
-datetime_str = now.strftime('%Y-%m-%d %H:%M:%S') # 2025-12-14 09:30:00 (Front Matter詳細用)
-unique_id = now.strftime('%Y%m%d_%H%M%S')     # 20251214_093000 (フォルダ・ファイル名識別用)
+date_str = now.strftime('%Y-%m-%d')            # 2025-12-14
+datetime_str = now.strftime('%Y-%m-%d %H:%M:%S') 
+unique_id = now.strftime('%Y%m%d_%H%M%S')     # 画像フォルダ・ファイル名用
 
-# 画像保存用設定（実行ごとにユニークなフォルダを作る）
-# 例: assets/img/posts/20251214_093000/
+# 画像保存用設定
 image_dir = os.path.join("assets", "img", "posts", unique_id)
 os.makedirs(image_dir, exist_ok=True)
 
 cover_filename = "cover.jpg"
 cover_physical_path = os.path.join(image_dir, cover_filename)
-# Web用のパス (Jekyll/Hugo等で参照するパス)
 correct_front_matter_img_path = f"/assets/img/posts/{unique_id}/{cover_filename}"
 
 # モデル設定
@@ -41,7 +39,7 @@ IDEAS_FILE = "ideas.csv"
 
 def get_next_idea_and_update_csv(file_path):
     if not os.path.exists(file_path):
-        print(f"Error: {file_path} not found.")
+        # CSVがない場合はNoneを返してデフォルトテーマへ
         return None
 
     target_row = None
@@ -62,13 +60,12 @@ def get_next_idea_and_update_csv(file_path):
             target_row = row
             # ステータス更新
             row['ステータス'] = '済'
-            # 記事化日に時間まで入れる（ログとして便利）
             row['記事化日'] = datetime_str 
             print(f"★ Found new idea: {row.get('製品名')}")
             break
     
     if not target_row:
-        print("No new ideas found in CSV (All done).")
+        print("No new ideas found in CSV (All done). Using Default.")
         return None
 
     try:
@@ -87,7 +84,7 @@ def get_next_idea_and_update_csv(file_path):
 idea_data = get_next_idea_and_update_csv(IDEAS_FILE)
 
 if idea_data:
-    product_name = idea_data.get('製品名', 'ガジェット').replace("/", " ") # ファイル名用にスラッシュ等は置換
+    product_name = idea_data.get('製品名', 'ガジェット').replace("/", " ")
     details = idea_data.get('活用詳細', '')
     price = idea_data.get('推定価格', '')
     
@@ -105,7 +102,7 @@ else:
 def download_ai_image(prompt_text, save_path):
     try:
         encoded_prompt = urllib.parse.quote(prompt_text)
-        # seedに時間を使い、かつ固有IDも混ぜて完全にランダム化
+        # seedにunique_idを使用して完全にランダム化
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={unique_id}"
         print(f"Downloading image: {prompt_text[:30]}...")
         
@@ -128,7 +125,6 @@ def process_body_images(content, save_dir, web_path_unique_id):
     for i, prompt_text in enumerate(matches):
         filename = f"body-{i+1}.jpg"
         save_path = os.path.join(save_dir, filename)
-        # Webパスにも unique_id を含める
         web_path = f"posts/{web_path_unique_id}/{filename}"
         
         print(f"Found body image request: {prompt_text}")
@@ -145,6 +141,7 @@ def process_body_images(content, save_dir, web_path_unique_id):
     return new_content
 
 # --- 記事生成 ---
+# ★修正ポイント: 目次リンク切れを防ぐための「見出しルール」と「目次自動生成の禁止」を追加
 prompt = f"""
 あなたは**「コストパフォーマンスの追求をこよなく愛し、製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口テックブロガー」**です。
 以下のテーマについて、読者が「ここまでやるか？」と驚くような、しかし実用的でコストパフォーマンスに優れた「極限活用術（ハック）」の記事を書いてください。
@@ -152,33 +149,39 @@ prompt = f"""
 ## 執筆テーマ
 {theme_instruction}
 
-## ターゲット読者（ペルソナ）
+## ターゲット読者
 - 「買ったのに使いこなせていない」という罪悪感を持つ人。
 - カタログスペックよりも「現場でどう役に立つか」を知りたい人。
-- 「自動化」「時短」「固定費削減」という言葉に弱い人。
 
 ## 記事の構成と執筆ルール
 1. **トーン＆マナー**:
-   - 丁寧語だが、情熱的で少し辛口。「〜ですよね」という共感よりも、「〜すべきです」「〜は金の無駄です」と言い切るスタイル。
-   - 抽象的な表現（「便利です」「おすすめです」）は禁止。「作業時間が30分減ります」「年間1万円浮きます」と具体的に書く。
+   - 丁寧語だが、情熱的で少し辛口。
+   - 抽象的な表現は避け、「作業時間が30分減る」「年間1万円浮く」と具体的に書く。
 
-2. **本文構成**:
-   - **導入**: 読者の抱える「無駄」を指摘し、本記事で得られる「利益（時間・金）」を提示する。
-   - **極限活用ハック (3〜5選)**:
-     - 単なる機能紹介はNG。
-     - 「この製品とアプリXを組み合わせる」「この設定をOFFにして逆に〜に使う」といった応用的な使い方を書く。
-   - **推奨設定・注意点**: 失敗しやすいポイントを先回りして教える。
-   - **まとめ**: 「今日からすぐやるべきアクション」を提示して締める。
+2. **【重要】見出し（##, ###）のルール**:
+   - **絵文字使用禁止**: 見出しに絵文字（🚀など）を含めると、目次リンクが機能しなくなるため絶対に使わないこと。
+   - **リンク禁止**: 見出しの中にリンクを含めないこと。
+   - **記号禁止**: カッコや引用符などの記号を見出しに使わず、プレーンなテキストにすること。
+   - 悪い例: `## 🚀 活用法 [リンク]`
+   - 良い例: `## 活用法`
 
-3. **アフィリエイトリンクの配置（重要）**:
-   - 記事内で紹介した具体的な製品名やサービス名が登場したら、その直後（または段落の終わり）に必ず検索リンクを置くこと。
+3. **【重要】目次のルール**:
+   - **本文中に「目次」というセクションやリストを自分で書かないこと。** - システム側で自動生成するため、あなたが書くと二重になり、かつリンクとして機能しません。
+
+4. **本文構成**:
+   - **導入**: 読者の抱える「無駄」を指摘し、利益を提示する。
+   - **極限活用ハック (3〜5選)**: 具体的な応用例を書く。
+   - **注意点**: 失敗しやすいポイントを教える。
+   - **まとめ**: すぐやるべきアクションで締める。
+
+5. **アフィリエイトリンク（表組み禁止）**:
+   - 製品名が登場したら、その直後に検索リンクを置く。
    - **Markdownの表（テーブル）は使用禁止**。
    - リンク形式: `▷ [🛒 Amazonで「{product_name}」を検索](https://www.amazon.co.jp/s?k={product_name})`
-   - 記事の最後にも「今回紹介したアイテムリスト」としてリンクを再掲すること。
+   - 記事末尾にもリストとして再掲する。
 
-4. **画像生成プロンプトの挿入**:
-   - 記事の理解を助ける挿絵が必要な箇所に、以下の形式で2〜3回挿入すること。
-   - 形式: `[[IMG: 英語の画像生成プロンプト]]`
+6. **画像生成**:
+   - 挿絵が必要な箇所に `[[IMG: 英語プロンプト]]` を2〜3回挿入。
 
 ## 必須フォーマット (厳守)
 以下のFront Matter形式で開始すること。
@@ -206,9 +209,11 @@ try:
     content = response.text.replace("```markdown", "").replace("```", "").strip()
 
     # --- 強制修正ロジック ---
-    # 日付(date)フィールドに、時間を含めた正確なdatetime_strを入れる
+    # 日付と画像のパスをPython側の正確な値に置換
     content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
     content = re.sub(r'^img:\s*.*$', f'img: {correct_front_matter_img_path}', content, flags=re.MULTILINE)
+    
+    # toc: true がない場合は追加
     if "toc: true" not in content:
         content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
 
@@ -219,11 +224,9 @@ try:
         print("Warning: Cover image generation failed.")
 
     print("--- Processing Body Images ---")
-    # ここで unique_id を渡すのが重要
     content = process_body_images(content, image_dir, unique_id)
 
     # --- ファイル保存 ---
-    # ファイル名にも unique_id (YYYYMMDD_HHMMSS) を使用して重複回避
     filename = f"{unique_id}-{product_name}.md" 
     filepath = os.path.join("_posts", filename)
     os.makedirs("_posts", exist_ok=True)
