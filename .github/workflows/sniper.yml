@@ -1,10 +1,10 @@
 name: Market Sniper Bot
 
 on:
-  schedule:
-    # 4時間ごとに実行 (UTC基準)
-    # 日本時間だと 3時, 7時, 11時, 15時, 19時, 23時
-    - cron: '0 */4 * * *'
+  # schedule:
+  #   # 4時間ごとに実行 (UTC基準)
+  #   # 日本時間だと 3時, 7時, 11時, 15時, 19時, 23時
+  #   - cron: '0 */4 * * *'
   workflow_dispatch: # テスト用の手動実行ボタン
 
 permissions:
