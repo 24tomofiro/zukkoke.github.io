@@ -6,7 +6,7 @@ import re
 import urllib.parse
 import json
 import time
-import csv  # 追加
+import csv
 
 # APIキーの取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -15,32 +15,31 @@ if not API_KEY:
 
 genai.configure(api_key=API_KEY)
 
-# --- 日付とパスの確定 ---
-today = datetime.date.today()
-date_str = today.strftime('%Y-%m-%d')
-date_compact = today.strftime('%Y%m%d')
+# ==========================================
+#  変更点1: 日付だけでなく「現在時刻」を取得して固有IDを作る
+# ==========================================
+now = datetime.datetime.now()
+date_str = now.strftime('%Y-%m-%d')            # 2025-12-14 (Front Matter用)
+datetime_str = now.strftime('%Y-%m-%d %H:%M:%S') # 2025-12-14 09:30:00 (Front Matter詳細用)
+unique_id = now.strftime('%Y%m%d_%H%M%S')     # 20251214_093000 (フォルダ・ファイル名識別用)
 
-# 画像保存用設定
-image_dir = os.path.join("assets", "img", "posts", date_compact)
+# 画像保存用設定（実行ごとにユニークなフォルダを作る）
+# 例: assets/img/posts/20251214_093000/
+image_dir = os.path.join("assets", "img", "posts", unique_id)
 os.makedirs(image_dir, exist_ok=True)
+
 cover_filename = "cover.jpg"
 cover_physical_path = os.path.join(image_dir, cover_filename)
-correct_front_matter_img_path = f"posts/{date_compact}/{cover_filename}"
+# Web用のパス (Jekyll/Hugo等で参照するパス)
+correct_front_matter_img_path = f"/assets/img/posts/{unique_id}/{cover_filename}"
 
 # モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# ==========================================
-#  ここから: CSV管理ロジックへの変更部分
-# ==========================================
+# --- CSV管理ロジック ---
 IDEAS_FILE = "ideas.csv"
-current_idea = None
 
 def get_next_idea_and_update_csv(file_path):
-    """
-    CSVを読み込み、ステータスが未完了の最初の行を取得。
-    取得と同時にメモリ上でステータスを更新し、ファイルを上書き保存する。
-    """
     if not os.path.exists(file_path):
         print(f"Error: {file_path} not found.")
         return None
@@ -48,9 +47,8 @@ def get_next_idea_and_update_csv(file_path):
     target_row = None
     all_rows = []
     
-    # 1. 読み込み
     try:
-        with open(file_path, mode='r', encoding='utf-8-sig') as f: # Excel互換のためutf-8-sig推奨
+        with open(file_path, mode='r', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             all_rows = list(reader)
@@ -58,17 +56,14 @@ def get_next_idea_and_update_csv(file_path):
         print(f"Error reading CSV: {e}")
         return None
 
-    # 2. 未処理データの検索と更新
     for row in all_rows:
-        # ステータス列が空、または '未' の場合を対象とする
         status = row.get('ステータス', '').strip()
         if status not in ['済', 'Done', 'Complete']:
             target_row = row
-            
-            # メモリ上で更新 (ステータスと日付)
+            # ステータス更新
             row['ステータス'] = '済'
-            row['記事化日'] = date_str
-            
+            # 記事化日に時間まで入れる（ログとして便利）
+            row['記事化日'] = datetime_str 
             print(f"★ Found new idea: {row.get('製品名')}")
             break
     
@@ -76,49 +71,42 @@ def get_next_idea_and_update_csv(file_path):
         print("No new ideas found in CSV (All done).")
         return None
 
-    # 3. CSVへの書き戻し（ロック用）
     try:
         with open(file_path, mode='w', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(all_rows)
-            print("CSV updated: Status set to '済'")
+            print("CSV updated.")
     except Exception as e:
         print(f"Error updating CSV: {e}")
-        # 書き込み失敗時はNoneを返して処理を中断させるべき
         return None
 
     return target_row
 
-# 実行してテーマを取得
+# 実行
 idea_data = get_next_idea_and_update_csv(IDEAS_FILE)
 
 if idea_data:
-    product_name = idea_data.get('製品名', 'ガジェット')
-    details = idea_data.get('活用詳細', '') # カラム名はCSVに合わせて調整してください
+    product_name = idea_data.get('製品名', 'ガジェット').replace("/", " ") # ファイル名用にスラッシュ等は置換
+    details = idea_data.get('活用詳細', '')
     price = idea_data.get('推定価格', '')
     
     theme_instruction = f"""
     今回の執筆対象製品: 「{product_name}」 (推定価格: {price})
-    
     この製品の「極限活用法」として、以下のアイデアを核にして記事を膨らませてください：
     {details}
     """
 else:
-    # CSVにネタがない、またはエラー時のフォールバック
     print("Fallback to default theme.")
     theme_instruction = "テーマ: 「最新の低価格ガジェット活用術」について書いてください。"
-    product_name = "ガジェット" # 仮置き
+    product_name = "ガジェット"
 
-# ==========================================
-#  ここまで: CSV管理ロジックへの変更部分
-# ==========================================
-
+# --- 画像DL関数 ---
 def download_ai_image(prompt_text, save_path):
-    """画像生成・保存関数"""
     try:
         encoded_prompt = urllib.parse.quote(prompt_text)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={int(time.time())}"
+        # seedに時間を使い、かつ固有IDも混ぜて完全にランダム化
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={unique_id}"
         print(f"Downloading image: {prompt_text[:30]}...")
         
         response = requests.get(url, timeout=30)
@@ -133,21 +121,21 @@ def download_ai_image(prompt_text, save_path):
         print(f"Image download error: {e}")
     return False
 
-def process_body_images(content, save_dir, web_path_prefix):
-    """本文中の [[IMG: プロンプト]] を検索し、画像を生成して置換する"""
+def process_body_images(content, save_dir, web_path_unique_id):
     matches = re.findall(r'\[\[IMG:\s*(.*?)\]\]', content)
     new_content = content
     
     for i, prompt_text in enumerate(matches):
         filename = f"body-{i+1}.jpg"
         save_path = os.path.join(save_dir, filename)
-        web_path = f"{web_path_prefix}/{filename}"
+        # Webパスにも unique_id を含める
+        web_path = f"posts/{web_path_unique_id}/{filename}"
         
         print(f"Found body image request: {prompt_text}")
         full_prompt = f"{prompt_text} professional tech illustration 4k"
         
         if download_ai_image(full_prompt, save_path):
-            markdown_image = f"![{prompt_text}](/assets/img/{web_path})" # パス修正: /assets... から始まる絶対パス推奨
+            markdown_image = f"![{prompt_text}](/assets/img/{web_path})"
             new_content = new_content.replace(f"[[IMG:{prompt_text}]]", markdown_image)
             new_content = new_content.replace(f"[[IMG: {prompt_text}]]", markdown_image)
         else:
@@ -156,8 +144,7 @@ def process_body_images(content, save_dir, web_path_prefix):
             
     return new_content
 
-# --- 1. 記事生成 ---
-# プロンプト内の変数を product_name を使うように微調整
+# --- 記事生成 ---
 prompt = f"""
 あなたは**「コストパフォーマンスの追求をこよなく愛し、製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口テックブロガー」**です。
 以下のテーマについて、読者が「ここまでやるか？」と驚くような、しかし実用的でコストパフォーマンスに優れた「極限活用術（ハック）」の記事を書いてください。
@@ -202,7 +189,7 @@ toc: true
 read_time: true
 show_date: true
 title: "【極限活用】(ここに刺激的なタイトル)"
-date: {date_str}
+date: {datetime_str}
 img: {correct_front_matter_img_path}
 tags: [Productivity, LifeHack, Gadget, {product_name}]
 category: tech
@@ -210,8 +197,8 @@ author: "Gemini Bot"
 description: "(ここに80文字程度のSEOを意識した記事概要)"
 ---
 
-(ここから本文を開始)
-<tweet>(ここに記事のハイライトとなる「パンチライン」を1つ書く)</tweet>
+(ここから本文)
+<tweet>(パンチライン)</tweet>
 """
 
 try:
@@ -219,24 +206,25 @@ try:
     content = response.text.replace("```markdown", "").replace("```", "").strip()
 
     # --- 強制修正ロジック ---
-    content = re.sub(r'^date:\s*.*$', f'date: {date_str}', content, flags=re.MULTILINE)
+    # 日付(date)フィールドに、時間を含めた正確なdatetime_strを入れる
+    content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
     content = re.sub(r'^img:\s*.*$', f'img: {correct_front_matter_img_path}', content, flags=re.MULTILINE)
     if "toc: true" not in content:
         content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
 
-    # --- 2. 画像生成処理 ---
+    # --- 画像生成 ---
     print("--- Generating Cover Image ---")
-    # プロンプトに製品名を含める
     image_prompt = f"{product_name} technology minimal workspace professional 4k"
     if not download_ai_image(image_prompt, cover_physical_path):
         print("Warning: Cover image generation failed.")
 
     print("--- Processing Body Images ---")
-    web_path_prefix = f"posts/{date_compact}"
-    content = process_body_images(content, image_dir, web_path_prefix)
+    # ここで unique_id を渡すのが重要
+    content = process_body_images(content, image_dir, unique_id)
 
-    # --- 3. ファイル保存 ---
-    filename = f"{date_str}-{product_name}.md" # ファイル名に製品名を入れると管理しやすい
+    # --- ファイル保存 ---
+    # ファイル名にも unique_id (YYYYMMDD_HHMMSS) を使用して重複回避
+    filename = f"{unique_id}-{product_name}.md" 
     filepath = os.path.join("_posts", filename)
     os.makedirs("_posts", exist_ok=True)
 
