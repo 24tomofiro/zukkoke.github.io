@@ -19,8 +19,7 @@ if not API_KEY:
 
 genai.configure(api_key=API_KEY)
 
-# ★修正: モデルを最新かつバランスの良い 'gemini-2.5-flash' に変更
-# Thinkingモデルのため論理的な構成力が高く、かつFlash枠なのでAPI制限も緩やかです。
+# モデル設定 (gemini-2.5-flash)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # ==========================================
@@ -177,24 +176,37 @@ def process_body_images(content, save_dir, web_path_unique_id):
     return new_content
 
 # ==========================================
-#  プロンプト作成
+#  プロンプト作成 (目次生成指示を追加)
 # ==========================================
 prompt = f"""
-あなたは**「コストパフォーマンスの追求をこよなく愛し、製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口テックブロガー」**です。
+あなたは**「コストパフォーマンスの追求をこよなく愛し、ガジェット製品はもちろんのこと日用品やキッチン用品などあらゆる製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口ライフハックブロガー」**です。
 以下のテーマについて、読者が「ここまでやるか？」と驚くような、しかし実用的でコストパフォーマンスに優れた「極限活用術（ハック）」の記事を書いてください。
 
 ## 執筆テーマ
 {theme_instruction}
 
+## ★最重要：目次（プルダウン式）の作成ルール
+記事の冒頭（導入文の直後）に、以下のHTML形式で**「クリックで開閉する目次」を必ず作成**してください。
+Markdownの自動生成目次は使用しません。
+
+<details style="border: 1px solid #ddd; padding: 10px; border-radius: 5px; margin-bottom: 20px;">
+<summary style="cursor: pointer; font-weight: bold;">📖 目次 (クリックで開く)</summary>
+
+- [1. はじめに](#1-はじめに)
+- [2. 具体的な活用法](#2-具体的な活用法)
+... (各見出しへのリンク)
+</details>
+
+※リンク先（#xxx）は、後述する見出し（## xxx）と**完全に一致**させてください。
+
 ## ★最重要：見出し（##, ###）のルール
-目次リンクが正しく機能するために、以下のルールを**厳守**してください。
-1. **「短く、体言止め」にする**: 長い文章のような見出しは禁止。
-2. **「記号・句読点」禁止**: 句点(。)、読点(、)、カッコ、クォート、絵文字は絶対に使わないこと。
-3. **プレーンテキストのみ**: 太字やリンクを含めない。
-   - 良い例: `## 活用方法その1`
-   - 良い例: `## 設定手順`
-   - 悪い例: `## **1. 活用方法その1：まずはここから** 🚀` (記号と太字がNG)
-   - 悪い例: `## 驚くべきことに、これで効率が2倍になる` (文章調がNG)
+リンク切れを防ぐため、以下のルールを厳守してください。
+1. **記号禁止**: 絵文字(🚀)、句読点(。、)、カッコは使わない。
+2. **プレーンテキスト**: 太字(**)やリンク([])を含めない。
+3. **一致させる**: 目次のリンクと見出しの文字を一言一句合わせる。
+
+   - 良い例: `## 1. はじめに`  (目次リンク: `#1-はじめに`)
+   - 悪い例: `## **1. はじめに** 🚀` (リンクが飛びません)
 
    ## ターゲット読者
 - 「買ったのに使いこなせていない」という罪悪感を持つ人。
@@ -232,10 +244,11 @@ prompt = f"""
 
 ## 必須フォーマット (厳守)
 以下のFront Matter形式で開始すること。
+**注意: `toc: false` に設定して、動かないサイドバー目次を消すこと。**
 
 ---
 layout: post
-toc: true
+toc: false
 read_time: true
 show_date: true
 title: "【極限活用】(ここに刺激的なタイトル)"
@@ -267,9 +280,8 @@ for attempt in range(max_retries):
         print(f"Error occurred: {e}")
         
         # 429エラー(Resource Exhausted)やサーバーエラー時の処理
-        # gemini-2.5-flashは制限が緩いですが、念のための安全策です
         if attempt < max_retries - 1:
-            wait_time = 10  # 15 RPMあれば短めの待機で十分回復します
+            wait_time = 20  # 少し長めに待機
             print(f"Waiting {wait_time} seconds before retry...")
             time.sleep(wait_time)
         else:
@@ -283,8 +295,11 @@ for attempt in range(max_retries):
 # 強制修正ロジック (AIがFront Matterを間違えた場合の保険)
 content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
 content = re.sub(r'^img:\s*.*$', f'img: {front_matter_img_path}', content, flags=re.MULTILINE)
-if "toc: true" not in content:
-    content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
+
+# toc: true があったら false に書き換える (サイドバー目次を消すため)
+content = re.sub(r'toc:\s*true', 'toc: false', content)
+if "toc: false" not in content:
+    content = re.sub(r'layout: post', 'layout: post\ntoc: false', content)
 
 # --- 画像生成 ---
 print("--- Generating Cover Image ---")
