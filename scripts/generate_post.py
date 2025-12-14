@@ -19,7 +19,7 @@ if not API_KEY:
 
 genai.configure(api_key=API_KEY)
 
-# モデル設定 (gemini-2.5-flash)
+# モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # ==========================================
@@ -70,14 +70,11 @@ def get_next_idea_and_update_csv(file_path):
 
     for row in all_rows:
         status = row.get('ステータス', '').strip()
-        # 完了ステータス以外を検索
         if status not in ['済', 'Done', 'Complete']:
             target_row = row
-            # ステータス更新
             row['ステータス'] = '済'
             row['記事化日'] = datetime_str 
             
-            # 取得確認用ログ
             p_name = row.get('製品・サービス名')
             if p_name:
                  print(f"★ Found new idea: {p_name}")
@@ -107,7 +104,6 @@ def get_next_idea_and_update_csv(file_path):
 idea_data = get_next_idea_and_update_csv(IDEAS_FILE)
 
 if idea_data:
-    # データを取得
     product_name = idea_data.get('製品・サービス名', 'ガジェット').replace("/", " ")
     details = idea_data.get('極限活用法・その価値', '')
     price = idea_data.get('推定価格', '')
@@ -131,11 +127,9 @@ else:
 def download_ai_image(prompt_text, save_path):
     try:
         encoded_prompt = urllib.parse.quote(prompt_text)
-        # Seedを固定して一貫性を持たせる
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={unique_id}"
         print(f"Downloading image: {prompt_text[:30]}...")
         
-        # API制限対策 (Pollinations側への配慮)
         time.sleep(1) 
         response = requests.get(url, timeout=30)
         
@@ -175,7 +169,7 @@ def process_body_images(content, save_dir, web_path_unique_id):
     return new_content
 
 # ==========================================
-#  プロンプト作成
+#  プロンプト作成 (目次部分をHTML形式に変更)
 # ==========================================
 prompt = f"""
 あなたは**「コストパフォーマンスの追求をこよなく愛し、ガジェット製品はもちろんのこと日用品やキッチン用品などあらゆる製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口ライフハックブロガー」**です。
@@ -184,16 +178,17 @@ prompt = f"""
 ## 執筆テーマ
 {theme_instruction}
 
-## ★最重要：目次（プルダウン式）の作成ルール
-記事の冒頭（導入文の直後）に、以下のHTML形式で**「クリックで開閉する目次」を必ず作成**してください。
-Markdownの自動生成目次は使用しません。
+## ★最重要：目次（HTMLリスト形式）の作成ルール
+記事の冒頭（導入文の直後）に、以下の**HTMLタグ形式**で「クリックで開閉する目次」を必ず作成してください。
+**Markdownの箇条書き（- [ ]）は使用しないでください（崩れます）。**
 
 <details style="border: 1px solid #ddd; padding: 10px; border-radius: 5px; margin-bottom: 20px;">
 <summary style="cursor: pointer; font-weight: bold;">📖 目次 (クリックで開く)</summary>
-
-- [1. はじめに](#1-はじめに)
-- [2. 具体的な活用法](#2-具体的な活用法)
-... (各見出しへのリンク)
+<ul>
+  <li><a href="#1-はじめに">1. はじめに</a></li>
+  <li><a href="#2-具体的な活用法">2. 具体的な活用法</a></li>
+  <li><a href="#3-導入手順">3. 導入手順</a></li>
+  </ul>
 </details>
 
 ## ★最重要：見出し（##, ###）のルール
@@ -202,6 +197,7 @@ Markdownの自動生成目次は使用しません。
 2. **一致させる**: 目次のhref="#..."と、見出しのテキストを対応させる。
    - 見出し: `## 1. はじめに`  →  リンク: `<a href="#1-はじめに">`
    - 見出し: `## 2. 活用法`    →  リンク: `<a href="#2-活用法">`
+
 ## 執筆ルール
 1. **トーン＆マナー**:
    - 丁寧語だが、情熱的で少し辛口。基本的にはですます調とする
@@ -216,6 +212,7 @@ Markdownの自動生成目次は使用しません。
 
 3. **【重要】目次のルール**:
    - **本文中に「目次」というセクションやリストを自分で書かないこと。** - システム側で自動生成するため、あなたが書くと二重になり、かつリンクとして機能しません。
+
 ## 記事の構成
 1. **導入**: 読者の抱える「無駄」を指摘し、利益を提示する。
 2. **プルダウン目次**: 上記のHTML形式で配置。
@@ -228,6 +225,7 @@ Markdownの自動生成目次は使用しません。
    - **Markdownの表（テーブル）は使用禁止**。
    - リンク形式: `▷ [🛒 Amazonで「{product_name}」を検索](https://www.amazon.co.jp/s?k={product_name})`
    - 記事末尾にもリストとして再掲する。
+
 ## 画像生成
    - 挿絵が必要な箇所に `[[IMG: 英語プロンプト]]` を2〜3回挿入。
     - 例: `[[IMG: A high-tech workspace with gadgets, minimalistic style, 4k]]`
@@ -247,7 +245,7 @@ img: {front_matter_img_path}
 tags: [Productivity, LifeHack, Gadget, {product_name}]
 category: tech
 author: "Gemini Bot"
-description: "(記事概要)"
+description: "(ここに80文字程度のSEOを意識した記事概要)"
 ---
 
 (ここから本文)
@@ -262,14 +260,10 @@ for attempt in range(max_retries):
     try:
         print(f"Generating content with gemini-2.5-flash (Attempt {attempt+1}/{max_retries})...")
         response = model.generate_content(prompt)
-        
-        # 整形処理
         content = response.text.replace("```markdown", "").replace("```", "").strip()
         break 
     except Exception as e:
         print(f"Error occurred: {e}")
-        
-        # 429エラー(Resource Exhausted)やサーバーエラー時の処理
         if attempt < max_retries - 1:
             wait_time = 20
             print(f"Waiting {wait_time} seconds before retry...")
@@ -281,8 +275,6 @@ for attempt in range(max_retries):
 # ==========================================
 #  後処理・保存
 # ==========================================
-
-# 強制修正ロジック (AIがFront Matterを間違えた場合の保険)
 content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
 content = re.sub(r'^img:\s*.*$', f'img: {front_matter_img_path}', content, flags=re.MULTILINE)
 
@@ -301,7 +293,6 @@ print("--- Processing Body Images ---")
 content = process_body_images(content, image_dir, unique_id)
 
 # --- ファイル保存 ---
-# Jekyll形式のファイル名 (YYYY-MM-DD-HHMM-Product.md)
 safe_product_name = re.sub(r'[\\/*?:"<>|]', "", product_name)
 filename = f"{file_date_prefix}-{file_time_suffix}-{safe_product_name}.md"
 
