@@ -2,12 +2,15 @@ name: Daily Blog Generator
 
 on:
   schedule:
-    # 毎日 日本時間の朝9時 (UTC 0:00) に実行
-    - cron: '0 0 * * *'
-  workflow_dispatch: # 手動実行ボタン（テスト用）
+    # 毎日 3回実行 (UTC時間で指定)
+    # 0:00 UTC = 09:00 JST
+    # 4:00 UTC = 13:00 JST
+    # 10:00 UTC = 19:00 JST
+    - cron: '0 0,4,10 * * *'
+  workflow_dispatch: # 手動実行ボタン
 
 permissions:
-  contents: write # リポジトリへの書き込み権限を与える
+  contents: write
 
 jobs:
   build:
@@ -37,5 +40,5 @@ jobs:
           git config --global user.name "Gemini Bot"
           git config --global user.email "gemini-bot@example.com"
           git add .
-          # 変更がある場合のみコミット
+          # 変更がある場合のみコミット（空コミットによるエラー回避）
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-generated blog post by Gemini" && git push)
