@@ -26,21 +26,20 @@ datetime_str = now.strftime('%Y-%m-%d %H:%M:%S')
 # 2. 画像フォルダ用ID (ユニーク性重視)
 unique_id = now.strftime('%Y%m%d_%H%M%S')
 
-# 3. 記事ファイル名用 (Jekyll用 YYYY-MM-DD 形式)
+# 3. 記事ファイル名用 (Jekyll認識用 YYYY-MM-DD)
 file_date_prefix = now.strftime('%Y-%m-%d')
 file_time_suffix = now.strftime('%H%M')
 
-# 画像保存用ディレクトリ (物理パス)
-# ここは実際に保存する場所なので assets/img/... のままでOK
+# 画像保存用ディレクトリ (物理パス: assets/img/posts/ID)
 image_dir = os.path.join("assets", "img", "posts", unique_id)
 os.makedirs(image_dir, exist_ok=True)
 
 cover_filename = "cover.jpg"
 cover_physical_path = os.path.join(image_dir, cover_filename)
 
-# ★修正: Front Matterに書く画像パス
-# テーマの仕様に合わせて /assets/img/ を削除し、posts/ から開始
-correct_front_matter_img_path = f"posts/{unique_id}/{cover_filename}"
+# ★修正1: Front Matter用パス (テーマ仕様に合わせて "posts/" から開始)
+# 例: posts/20251214_100000/cover.jpg
+front_matter_img_path = f"posts/{unique_id}/{cover_filename}"
 
 # モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
@@ -133,19 +132,16 @@ def process_body_images(content, save_dir, web_path_unique_id):
     for i, prompt_text in enumerate(matches):
         filename = f"body-{i+1}.jpg"
         save_path = os.path.join(save_dir, filename)
-        # 修正: 記事内の画像リンクも posts/ 開始に合わせる (テーマ依存の場合)
-        # ただしMarkdown本文内では通常 /assets/... が安全だが、
-        # ユーザーの指摘に合わせて相対パス posts/... を試みるか、
-        # 既存の成功パターンに従い /assets/img/posts/... にするか。
-        # ここでは「Front Matterは特殊だが、本文は標準パス」の可能性が高いため
-        # 念のため絶対パス(/assets/img/posts/...)で生成します。
-        web_path = f"posts/{web_path_unique_id}/{filename}"
+        
+        # ★修正2: 本文内の画像リンクは /assets/img/... から始まる絶対パスにする
+        # これでMarkdownプレビューもWeb表示も正常に動作します
+        web_path_full = f"/assets/img/posts/{web_path_unique_id}/{filename}"
         
         print(f"Found body image request: {prompt_text}")
         full_prompt = f"{prompt_text} professional tech illustration 4k"
         
         if download_ai_image(full_prompt, save_path):
-            markdown_image = f"![{prompt_text}](/assets/img/{web_path})"
+            markdown_image = f"![{prompt_text}]({web_path_full})"
             new_content = new_content.replace(f"[[IMG:{prompt_text}]]", markdown_image)
             new_content = new_content.replace(f"[[IMG: {prompt_text}]]", markdown_image)
         else:
@@ -155,6 +151,7 @@ def process_body_images(content, save_dir, web_path_unique_id):
     return new_content
 
 # --- 記事生成 ---
+# ★修正3: product_name変数を直接埋め込み、NameErrorを回避
 prompt = f"""
 あなたは**「コストパフォーマンスの追求をこよなく愛し、製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口テックブロガー」**です。
 以下のテーマについて、読者が「ここまでやるか？」と驚くような、しかし実用的でコストパフォーマンスに優れた「極限活用術（ハック）」の記事を書いてください。
@@ -217,7 +214,7 @@ read_time: true
 show_date: true
 title: "【極限活用】(ここに刺激的なタイトル)"
 date: {datetime_str}
-img: {correct_front_matter_img_path}
+img: {front_matter_img_path}
 tags: [Productivity, LifeHack, Gadget, {product_name}]
 category: tech
 author: "Gemini Bot"
@@ -234,7 +231,7 @@ try:
 
     # --- 強制修正ロジック ---
     content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
-    content = re.sub(r'^img:\s*.*$', f'img: {correct_front_matter_img_path}', content, flags=re.MULTILINE)
+    content = re.sub(r'^img:\s*.*$', f'img: {front_matter_img_path}', content, flags=re.MULTILINE)
     if "toc: true" not in content:
         content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
 
@@ -248,7 +245,7 @@ try:
     content = process_body_images(content, image_dir, unique_id)
 
     # --- ファイル保存 ---
-    # Jekyll形式のファイル名
+    # Jekyll形式のファイル名 (YYYY-MM-DD-HHMM-Product.md)
     safe_product_name = re.sub(r'[\\/*?:"<>|]', "", product_name)
     filename = f"{file_date_prefix}-{file_time_suffix}-{safe_product_name}.md"
     
