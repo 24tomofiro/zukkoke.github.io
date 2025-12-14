@@ -92,8 +92,9 @@ def get_next_idea_and_update_csv(file_path):
 idea_data = get_next_idea_and_update_csv(IDEAS_FILE)
 
 if idea_data:
-    product_name = idea_data.get('製品名', 'ガジェット').replace("/", " ")
-    details = idea_data.get('活用詳細', '')
+    # ★修正: CSVのヘッダー名に合わせて取得キーを変更
+    product_name = idea_data.get('製品・サービス名', 'ガジェット').replace("/", " ")
+    details = idea_data.get('極限活用法・その価値', '')
     price = idea_data.get('推定価格', '')
     
     theme_instruction = f"""
