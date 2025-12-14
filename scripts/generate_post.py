@@ -169,14 +169,13 @@ def process_body_images(content, save_dir, web_path_unique_id):
             new_content = new_content.replace(f"[[IMG:{prompt_text}]]", markdown_image)
             new_content = new_content.replace(f"[[IMG: {prompt_text}]]", markdown_image)
         else:
-            # 失敗時はタグを消去
             new_content = new_content.replace(f"[[IMG:{prompt_text}]]", "")
             new_content = new_content.replace(f"[[IMG: {prompt_text}]]", "")
             
     return new_content
 
 # ==========================================
-#  プロンプト作成 (目次生成指示を追加)
+#  プロンプト作成
 # ==========================================
 prompt = f"""
 あなたは**「コストパフォーマンスの追求をこよなく愛し、ガジェット製品はもちろんのこと日用品やキッチン用品などあらゆる製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口ライフハックブロガー」**です。
@@ -197,24 +196,15 @@ Markdownの自動生成目次は使用しません。
 ... (各見出しへのリンク)
 </details>
 
-※リンク先（#xxx）は、後述する見出し（## xxx）と**完全に一致**させてください。
-
 ## ★最重要：見出し（##, ###）のルール
-リンク切れを防ぐため、以下のルールを厳守してください。
-1. **記号禁止**: 絵文字(🚀)、句読点(。、)、カッコは使わない。
-2. **プレーンテキスト**: 太字(**)やリンク([])を含めない。
-3. **一致させる**: 目次のリンクと見出しの文字を一言一句合わせる。
-
-   - 良い例: `## 1. はじめに`  (目次リンク: `#1-はじめに`)
-   - 悪い例: `## **1. はじめに** 🚀` (リンクが飛びません)
-
-   ## ターゲット読者
-- 「買ったのに使いこなせていない」という罪悪感を持つ人。
-- カタログスペックよりも「現場でどう役に立つか」を知りたい人。
-
-## 記事の構成と執筆ルール
+リンクを機能させるため、見出しのID（#xxx）は自動生成されるルールに従ってください。
+1. **記号禁止**: 見出しに絵文字、句読点、カッコを使わない。
+2. **一致させる**: 目次のhref="#..."と、見出しのテキストを対応させる。
+   - 見出し: `## 1. はじめに`  →  リンク: `<a href="#1-はじめに">`
+   - 見出し: `## 2. 活用法`    →  リンク: `<a href="#2-活用法">`
+## 執筆ルール
 1. **トーン＆マナー**:
-   - 丁寧語だが、情熱的で少し辛口。
+   - 丁寧語だが、情熱的で少し辛口。基本的にはですます調とする
    - 抽象的な表現は避け、「作業時間が30分減る」「年間1万円浮く」と具体的に書く。
 
 2. **【重要】見出し（##, ###）のルール**:
@@ -226,23 +216,23 @@ Markdownの自動生成目次は使用しません。
 
 3. **【重要】目次のルール**:
    - **本文中に「目次」というセクションやリストを自分で書かないこと。** - システム側で自動生成するため、あなたが書くと二重になり、かつリンクとして機能しません。
+## 記事の構成
+1. **導入**: 読者の抱える「無駄」を指摘し、利益を提示する。
+2. **プルダウン目次**: 上記のHTML形式で配置。
+3. **極限活用ハック (3〜5選)**: 具体的な応用例を書く。
+4. **注意点**: 失敗しやすいポイントを教える。
+5. **まとめ**: アクションプラン。
 
-4. **本文構成**:
-   - **導入**: 読者の抱える「無駄」を指摘し、利益を提示する。
-   - **極限活用ハック (3〜5選)**: 具体的な応用例を書く。
-   - **注意点**: 失敗しやすいポイントを教える。
-   - **まとめ**: すぐやるべきアクションで締める。
-
-5. **アフィリエイトリンク（表組み禁止）**:
+## アフィリエイトリンク（表組み禁止）
    - 製品名が登場したら、その直後に検索リンクを置く。
    - **Markdownの表（テーブル）は使用禁止**。
    - リンク形式: `▷ [🛒 Amazonで「{product_name}」を検索](https://www.amazon.co.jp/s?k={product_name})`
    - 記事末尾にもリストとして再掲する。
-
-6. **画像生成**:
+## 画像生成
    - 挿絵が必要な箇所に `[[IMG: 英語プロンプト]]` を2〜3回挿入。
+    - 例: `[[IMG: A high-tech workspace with gadgets, minimalistic style, 4k]]`
 
-## 必須フォーマット (厳守)
+## 必須フォーマット
 以下のFront Matter形式で開始すること。
 **注意: `toc: false` に設定して、動かないサイドバー目次を消すこと。**
 
@@ -257,7 +247,7 @@ img: {front_matter_img_path}
 tags: [Productivity, LifeHack, Gadget, {product_name}]
 category: tech
 author: "Gemini Bot"
-description: "(ここに80文字程度のSEOを意識した記事概要)"
+description: "(記事概要)"
 ---
 
 (ここから本文)
@@ -281,7 +271,7 @@ for attempt in range(max_retries):
         
         # 429エラー(Resource Exhausted)やサーバーエラー時の処理
         if attempt < max_retries - 1:
-            wait_time = 20  # 少し長めに待機
+            wait_time = 20
             print(f"Waiting {wait_time} seconds before retry...")
             time.sleep(wait_time)
         else:
@@ -296,7 +286,7 @@ for attempt in range(max_retries):
 content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
 content = re.sub(r'^img:\s*.*$', f'img: {front_matter_img_path}', content, flags=re.MULTILINE)
 
-# toc: true があったら false に書き換える (サイドバー目次を消すため)
+# toc: true があったら false に書き換える
 content = re.sub(r'toc:\s*true', 'toc: false', content)
 if "toc: false" not in content:
     content = re.sub(r'layout: post', 'layout: post\ntoc: false', content)
