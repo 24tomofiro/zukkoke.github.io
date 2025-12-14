@@ -16,14 +16,21 @@ if not API_KEY:
 genai.configure(api_key=API_KEY)
 
 # ==========================================
-#  日付設定
+#  日付・ID設定
 # ==========================================
 now = datetime.datetime.now()
-date_str = now.strftime('%Y-%m-%d')            # 2025-12-14
-datetime_str = now.strftime('%Y-%m-%d %H:%M:%S') 
-unique_id = now.strftime('%Y%m%d_%H%M%S')     # 画像フォルダ・ファイル名用
 
-# 画像保存用設定
+# 1. Front Matter用 (記事内の表示日付)
+datetime_str = now.strftime('%Y-%m-%d %H:%M:%S') 
+
+# 2. 画像フォルダ用ID (ユニーク性重視)
+unique_id = now.strftime('%Y%m%d_%H%M%S')
+
+# 3. ★修正: 記事ファイル名用 (Jekyll認識用: YYYY-MM-DD形式必須)
+file_date_prefix = now.strftime('%Y-%m-%d')  # 2025-12-14
+file_time_suffix = now.strftime('%H%M')      # 0930
+
+# 画像保存用ディレクトリ
 image_dir = os.path.join("assets", "img", "posts", unique_id)
 os.makedirs(image_dir, exist_ok=True)
 
@@ -39,7 +46,6 @@ IDEAS_FILE = "ideas.csv"
 
 def get_next_idea_and_update_csv(file_path):
     if not os.path.exists(file_path):
-        # CSVがない場合はNoneを返してデフォルトテーマへ
         return None
 
     target_row = None
@@ -58,14 +64,13 @@ def get_next_idea_and_update_csv(file_path):
         status = row.get('ステータス', '').strip()
         if status not in ['済', 'Done', 'Complete']:
             target_row = row
-            # ステータス更新
             row['ステータス'] = '済'
             row['記事化日'] = datetime_str 
             print(f"★ Found new idea: {row.get('製品名')}")
             break
     
     if not target_row:
-        print("No new ideas found in CSV (All done). Using Default.")
+        print("No new ideas found in CSV. Using Default.")
         return None
 
     try:
@@ -102,7 +107,6 @@ else:
 def download_ai_image(prompt_text, save_path):
     try:
         encoded_prompt = urllib.parse.quote(prompt_text)
-        # seedにunique_idを使用して完全にランダム化
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={unique_id}"
         print(f"Downloading image: {prompt_text[:30]}...")
         
@@ -209,11 +213,8 @@ try:
     content = response.text.replace("```markdown", "").replace("```", "").strip()
 
     # --- 強制修正ロジック ---
-    # 日付と画像のパスをPython側の正確な値に置換
     content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
     content = re.sub(r'^img:\s*.*$', f'img: {correct_front_matter_img_path}', content, flags=re.MULTILINE)
-    
-    # toc: true がない場合は追加
     if "toc: true" not in content:
         content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
 
@@ -227,7 +228,16 @@ try:
     content = process_body_images(content, image_dir, unique_id)
 
     # --- ファイル保存 ---
-    filename = f"{unique_id}-{product_name}.md" 
+    # ★修正: Jekyll形式 (YYYY-MM-DD-タイトル.md) に合わせる
+    # 日本語ファイル名でもGitHub Pagesは動作しますが、URLエンコードを避けるなら英語推奨。
+    # ここでは元の要望通り日本語を含めますが、日付形式は厳守します。
+    
+    # ファイル名に使えない文字を除去
+    safe_product_name = re.sub(r'[\\/*?:"<>|]', "", product_name)
+    
+    # 例: 2025-12-14-0930-ガジェット.md
+    filename = f"{file_date_prefix}-{file_time_suffix}-{safe_product_name}.md"
+    
     filepath = os.path.join("_posts", filename)
     os.makedirs("_posts", exist_ok=True)
 
