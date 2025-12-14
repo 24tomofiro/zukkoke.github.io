@@ -26,17 +26,21 @@ datetime_str = now.strftime('%Y-%m-%d %H:%M:%S')
 # 2. 画像フォルダ用ID (ユニーク性重視)
 unique_id = now.strftime('%Y%m%d_%H%M%S')
 
-# 3. ★修正: 記事ファイル名用 (Jekyll認識用: YYYY-MM-DD形式必須)
-file_date_prefix = now.strftime('%Y-%m-%d')  # 2025-12-14
-file_time_suffix = now.strftime('%H%M')      # 0930
+# 3. 記事ファイル名用 (Jekyll用 YYYY-MM-DD 形式)
+file_date_prefix = now.strftime('%Y-%m-%d')
+file_time_suffix = now.strftime('%H%M')
 
-# 画像保存用ディレクトリ
+# 画像保存用ディレクトリ (物理パス)
+# ここは実際に保存する場所なので assets/img/... のままでOK
 image_dir = os.path.join("assets", "img", "posts", unique_id)
 os.makedirs(image_dir, exist_ok=True)
 
 cover_filename = "cover.jpg"
 cover_physical_path = os.path.join(image_dir, cover_filename)
-correct_front_matter_img_path = f"/assets/img/posts/{unique_id}/{cover_filename}"
+
+# ★修正: Front Matterに書く画像パス
+# テーマの仕様に合わせて /assets/img/ を削除し、posts/ から開始
+correct_front_matter_img_path = f"posts/{unique_id}/{cover_filename}"
 
 # モデル設定
 model = genai.GenerativeModel('gemini-2.5-flash')
@@ -129,6 +133,12 @@ def process_body_images(content, save_dir, web_path_unique_id):
     for i, prompt_text in enumerate(matches):
         filename = f"body-{i+1}.jpg"
         save_path = os.path.join(save_dir, filename)
+        # 修正: 記事内の画像リンクも posts/ 開始に合わせる (テーマ依存の場合)
+        # ただしMarkdown本文内では通常 /assets/... が安全だが、
+        # ユーザーの指摘に合わせて相対パス posts/... を試みるか、
+        # 既存の成功パターンに従い /assets/img/posts/... にするか。
+        # ここでは「Front Matterは特殊だが、本文は標準パス」の可能性が高いため
+        # 念のため絶対パス(/assets/img/posts/...)で生成します。
         web_path = f"posts/{web_path_unique_id}/{filename}"
         
         print(f"Found body image request: {prompt_text}")
@@ -145,7 +155,6 @@ def process_body_images(content, save_dir, web_path_unique_id):
     return new_content
 
 # --- 記事生成 ---
-# ★修正ポイント: 目次リンク切れを防ぐための「見出しルール」と「目次自動生成の禁止」を追加
 prompt = f"""
 あなたは**「コストパフォーマンスの追求をこよなく愛し、製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口テックブロガー」**です。
 以下のテーマについて、読者が「ここまでやるか？」と驚くような、しかし実用的でコストパフォーマンスに優れた「極限活用術（ハック）」の記事を書いてください。
@@ -153,7 +162,18 @@ prompt = f"""
 ## 執筆テーマ
 {theme_instruction}
 
-## ターゲット読者
+## ★最重要：見出し（##, ###）のルール
+目次リンクが正しく機能するために、以下のルールを**厳守**してください。
+1. **「短く、体言止め」にする**: 長い文章のような見出しは禁止。
+2. **「記号・句読点」禁止**: 句点(。)、読点(、)、カッコ、クォート、絵文字は絶対に使わないこと。
+3. **プレーンテキストのみ**: 太字やリンクを含めない。
+
+   - 良い例: `## 活用方法その1`
+   - 良い例: `## 設定手順`
+   - 悪い例: `## **1. 活用方法その1：まずはここから** 🚀` (記号と太字がNG)
+   - 悪い例: `## 驚くべきことに、これで効率が2倍になる` (文章調がNG)
+
+   ## ターゲット読者
 - 「買ったのに使いこなせていない」という罪悪感を持つ人。
 - カタログスペックよりも「現場でどう役に立つか」を知りたい人。
 
@@ -228,14 +248,8 @@ try:
     content = process_body_images(content, image_dir, unique_id)
 
     # --- ファイル保存 ---
-    # ★修正: Jekyll形式 (YYYY-MM-DD-タイトル.md) に合わせる
-    # 日本語ファイル名でもGitHub Pagesは動作しますが、URLエンコードを避けるなら英語推奨。
-    # ここでは元の要望通り日本語を含めますが、日付形式は厳守します。
-    
-    # ファイル名に使えない文字を除去
+    # Jekyll形式のファイル名
     safe_product_name = re.sub(r'[\\/*?:"<>|]', "", product_name)
-    
-    # 例: 2025-12-14-0930-ガジェット.md
     filename = f"{file_date_prefix}-{file_time_suffix}-{safe_product_name}.md"
     
     filepath = os.path.join("_posts", filename)
