@@ -8,12 +8,20 @@ import json
 import time
 import csv
 
+# ==========================================
+#  基本設定
+# ==========================================
+
 # APIキーの取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     raise ValueError("GEMINI_API_KEY is not set")
 
 genai.configure(api_key=API_KEY)
+
+# ★修正: モデルを最新かつバランスの良い 'gemini-2.5-flash' に変更
+# Thinkingモデルのため論理的な構成力が高く、かつFlash枠なのでAPI制限も緩やかです。
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # ==========================================
 #  日付・ID設定
@@ -37,14 +45,12 @@ os.makedirs(image_dir, exist_ok=True)
 cover_filename = "cover.jpg"
 cover_physical_path = os.path.join(image_dir, cover_filename)
 
-# ★修正1: Front Matter用パス (テーマ仕様に合わせて "posts/" から開始)
-# 例: posts/20251214_100000/cover.jpg
+# Front Matter用パス (テーマ仕様: "posts/ID/file.jpg")
 front_matter_img_path = f"posts/{unique_id}/{cover_filename}"
 
-# モデル設定
-model = genai.GenerativeModel('gemini-2.5-flash')
-
-# --- CSV管理ロジック ---
+# ==========================================
+#  CSV管理ロジック
+# ==========================================
 IDEAS_FILE = "ideas.csv"
 
 def get_next_idea_and_update_csv(file_path):
@@ -65,11 +71,19 @@ def get_next_idea_and_update_csv(file_path):
 
     for row in all_rows:
         status = row.get('ステータス', '').strip()
+        # 完了ステータス以外を検索
         if status not in ['済', 'Done', 'Complete']:
             target_row = row
+            # ステータス更新
             row['ステータス'] = '済'
             row['記事化日'] = datetime_str 
-            print(f"★ Found new idea: {row.get('製品名')}")
+            
+            # 取得確認用ログ
+            p_name = row.get('製品・サービス名')
+            if p_name:
+                 print(f"★ Found new idea: {p_name}")
+            else:
+                 print(f"★ Warning: '製品・サービス名' column is empty. Keys: {list(row.keys())}")
             break
     
     if not target_row:
@@ -88,15 +102,20 @@ def get_next_idea_and_update_csv(file_path):
 
     return target_row
 
-# 実行
+# ==========================================
+#  テーマ設定
+# ==========================================
 idea_data = get_next_idea_and_update_csv(IDEAS_FILE)
 
 if idea_data:
-    # ★修正: CSVのヘッダー名に合わせて取得キーを変更
+    # データを取得
     product_name = idea_data.get('製品・サービス名', 'ガジェット').replace("/", " ")
     details = idea_data.get('極限活用法・その価値', '')
     price = idea_data.get('推定価格', '')
     
+    if product_name is None or product_name == "None":
+        product_name = "ガジェット"
+
     theme_instruction = f"""
     今回の執筆対象製品: 「{product_name}」 (推定価格: {price})
     この製品の「極限活用法」として、以下のアイデアを核にして記事を膨らませてください：
@@ -107,14 +126,20 @@ else:
     theme_instruction = "テーマ: 「最新の低価格ガジェット活用術」について書いてください。"
     product_name = "ガジェット"
 
-# --- 画像DL関数 ---
+# ==========================================
+#  画像DL関数
+# ==========================================
 def download_ai_image(prompt_text, save_path):
     try:
         encoded_prompt = urllib.parse.quote(prompt_text)
+        # Seedを固定して一貫性を持たせる
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1200&height=630&nologo=true&seed={unique_id}"
         print(f"Downloading image: {prompt_text[:30]}...")
         
+        # API制限対策 (Pollinations側への配慮)
+        time.sleep(1) 
         response = requests.get(url, timeout=30)
+        
         if response.status_code == 200:
             with open(save_path, 'wb') as f:
                 f.write(response.content)
@@ -134,8 +159,7 @@ def process_body_images(content, save_dir, web_path_unique_id):
         filename = f"body-{i+1}.jpg"
         save_path = os.path.join(save_dir, filename)
         
-        # ★修正2: 本文内の画像リンクは /assets/img/... から始まる絶対パスにする
-        # これでMarkdownプレビューもWeb表示も正常に動作します
+        # 本文内画像の絶対パス (Jekyll用)
         web_path_full = f"/assets/img/posts/{web_path_unique_id}/{filename}"
         
         print(f"Found body image request: {prompt_text}")
@@ -146,13 +170,15 @@ def process_body_images(content, save_dir, web_path_unique_id):
             new_content = new_content.replace(f"[[IMG:{prompt_text}]]", markdown_image)
             new_content = new_content.replace(f"[[IMG: {prompt_text}]]", markdown_image)
         else:
+            # 失敗時はタグを消去
             new_content = new_content.replace(f"[[IMG:{prompt_text}]]", "")
             new_content = new_content.replace(f"[[IMG: {prompt_text}]]", "")
             
     return new_content
 
-# --- 記事生成 ---
-# ★修正3: product_name変数を直接埋め込み、NameErrorを回避
+# ==========================================
+#  プロンプト作成
+# ==========================================
 prompt = f"""
 あなたは**「コストパフォーマンスの追求をこよなく愛し、製品やソフトウェアのポテンシャルを骨の髄までしゃぶり尽くすことに情熱を燃やす、実利主義の辛口テックブロガー」**です。
 以下のテーマについて、読者が「ここまでやるか？」と驚くような、しかし実用的でコストパフォーマンスに優れた「極限活用術（ハック）」の記事を書いてください。
@@ -165,7 +191,6 @@ prompt = f"""
 1. **「短く、体言止め」にする**: 長い文章のような見出しは禁止。
 2. **「記号・句読点」禁止**: 句点(。)、読点(、)、カッコ、クォート、絵文字は絶対に使わないこと。
 3. **プレーンテキストのみ**: 太字やリンクを含めない。
-
    - 良い例: `## 活用方法その1`
    - 良い例: `## 設定手順`
    - 悪い例: `## **1. 活用方法その1：まずはここから** 🚀` (記号と太字がNG)
@@ -226,38 +251,59 @@ description: "(ここに80文字程度のSEOを意識した記事概要)"
 <tweet>(パンチライン)</tweet>
 """
 
-try:
-    response = model.generate_content(prompt)
-    content = response.text.replace("```markdown", "").replace("```", "").strip()
+# ==========================================
+#  記事生成実行
+# ==========================================
+max_retries = 3
+for attempt in range(max_retries):
+    try:
+        print(f"Generating content with gemini-2.5-flash (Attempt {attempt+1}/{max_retries})...")
+        response = model.generate_content(prompt)
+        
+        # 整形処理
+        content = response.text.replace("```markdown", "").replace("```", "").strip()
+        break 
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        
+        # 429エラー(Resource Exhausted)やサーバーエラー時の処理
+        # gemini-2.5-flashは制限が緩いですが、念のための安全策です
+        if attempt < max_retries - 1:
+            wait_time = 10  # 15 RPMあれば短めの待機で十分回復します
+            print(f"Waiting {wait_time} seconds before retry...")
+            time.sleep(wait_time)
+        else:
+            print("Max retries reached. Exiting.")
+            exit(1)
 
-    # --- 強制修正ロジック ---
-    content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
-    content = re.sub(r'^img:\s*.*$', f'img: {front_matter_img_path}', content, flags=re.MULTILINE)
-    if "toc: true" not in content:
-        content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
+# ==========================================
+#  後処理・保存
+# ==========================================
 
-    # --- 画像生成 ---
-    print("--- Generating Cover Image ---")
-    image_prompt = f"{product_name} technology minimal workspace professional 4k"
-    if not download_ai_image(image_prompt, cover_physical_path):
-        print("Warning: Cover image generation failed.")
+# 強制修正ロジック (AIがFront Matterを間違えた場合の保険)
+content = re.sub(r'^date:\s*.*$', f'date: {datetime_str}', content, flags=re.MULTILINE)
+content = re.sub(r'^img:\s*.*$', f'img: {front_matter_img_path}', content, flags=re.MULTILINE)
+if "toc: true" not in content:
+    content = re.sub(r'layout: post', 'layout: post\ntoc: true', content)
 
-    print("--- Processing Body Images ---")
-    content = process_body_images(content, image_dir, unique_id)
+# --- 画像生成 ---
+print("--- Generating Cover Image ---")
+image_prompt = f"{product_name} technology minimal workspace professional 4k"
+if not download_ai_image(image_prompt, cover_physical_path):
+    print("Warning: Cover image generation failed.")
 
-    # --- ファイル保存 ---
-    # Jekyll形式のファイル名 (YYYY-MM-DD-HHMM-Product.md)
-    safe_product_name = re.sub(r'[\\/*?:"<>|]', "", product_name)
-    filename = f"{file_date_prefix}-{file_time_suffix}-{safe_product_name}.md"
-    
-    filepath = os.path.join("_posts", filename)
-    os.makedirs("_posts", exist_ok=True)
+print("--- Processing Body Images ---")
+content = process_body_images(content, image_dir, unique_id)
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(content)
+# --- ファイル保存 ---
+# Jekyll形式のファイル名 (YYYY-MM-DD-HHMM-Product.md)
+safe_product_name = re.sub(r'[\\/*?:"<>|]', "", product_name)
+filename = f"{file_date_prefix}-{file_time_suffix}-{safe_product_name}.md"
 
-    print(f"Successfully generated post: {filepath}")
+filepath = os.path.join("_posts", filename)
+os.makedirs("_posts", exist_ok=True)
 
-except Exception as e:
-    print(f"Error occurred: {e}")
-    exit(1)
+with open(filepath, "w", encoding="utf-8") as f:
+    f.write(content)
+
+print(f"Successfully generated post: {filepath}")
