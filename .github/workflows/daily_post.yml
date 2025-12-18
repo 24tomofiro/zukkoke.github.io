@@ -3,10 +3,6 @@ name: Daily Blog Generator
 on:
   schedule:
     # 毎日 3回実行 (UTC時間で指定)
-    # 0:00 UTC = 09:00 JST
-    # 4:00 UTC = 13:00 JST
-    # 10:00 UTC = 19:00 JST
-    - cron: '0 0,4,10 * * *'
   workflow_dispatch: # 手動実行ボタン
 
 permissions:
